@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build archives
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            GOOS="${target%/*}"
+            GOARCH="${target#*/}"
+            EXT=""
+            ARCHIVE_EXT="tar.gz"
+            if [ "$GOOS" = "windows" ]; then
+              EXT=".exe"
+              ARCHIVE_EXT="zip"
+            fi
+
+            WORKDIR="dist/glog_${GOOS}_${GOARCH}"
+            BIN_NAME="glog${EXT}"
+
+            rm -rf "$WORKDIR"
+            mkdir -p "$WORKDIR"
+
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+              go build -trimpath \
+              -ldflags "-s -w -X main.Version=${TAG} -X main.BuildTime=${BUILD_TIME}" \
+              -o "$WORKDIR/$BIN_NAME" ./cmd/glog
+
+            cp LICENSE "$WORKDIR/"
+            cp README.md "$WORKDIR/"
+
+            if [ "$ARCHIVE_EXT" = "zip" ]; then
+              (
+                cd dist
+                zip -rq "glog_${GOOS}_${GOARCH}.zip" "glog_${GOOS}_${GOARCH}"
+              )
+            else
+              tar -C dist -czf "dist/glog_${GOOS}_${GOARCH}.tar.gz" "glog_${GOOS}_${GOARCH}"
+            fi
+          done
+
+          (
+            cd dist
+            shasum -a 256 glog_*.tar.gz glog_*.zip > checksums.txt
+          )
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/glog_*.tar.gz
+            dist/glog_*.zip
+            dist/checksums.txt

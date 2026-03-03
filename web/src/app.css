@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom styles */
+.log-level-trace { @apply text-purple-600 bg-purple-50; }
+.log-level-debug { @apply text-blue-600 bg-blue-50; }
+.log-level-info  { @apply text-green-600 bg-green-50; }
+.log-level-warn  { @apply text-yellow-600 bg-yellow-50; }
+.log-level-error { @apply text-red-600 bg-red-50; }
+.log-level-fatal { @apply text-gray-900 bg-red-100; }
+
+.log-entry {
+  @apply border-b border-gray-200 hover:bg-gray-50 transition-colors;
+}
+
+.log-entry:hover .log-actions {
+  @apply opacity-100;
+}
+
+.log-actions {
+  @apply opacity-0 transition-opacity;
+}
+
+div.json-viewer {
+  @apply bg-gray-900 text-green-400 p-3 rounded-lg font-mono text-xs overflow-x-auto;
+}
+
+div.json-viewer pre {
+  @apply whitespace-pre-wrap;
+}
