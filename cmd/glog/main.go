@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 
 	"github.com/dotcommander/glog/cmd/glog/commands"
 	"github.com/spf13/cobra"
@@ -16,6 +17,13 @@ var (
 )
 
 func main() {
+	// Fallback to build info when not set via ldflags
+	if Version == "dev" {
+		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+			Version = info.Main.Version
+		}
+	}
+
 	// Pass version info to commands package
 	commands.Version = Version
 	commands.BuildTime = BuildTime
