@@ -11,6 +11,22 @@ import (
 	"github.com/dotcommander/glog/internal/domain/ports"
 )
 
+// allowedOrderBy is the set of valid column names for ORDER BY in log queries.
+var allowedOrderBy = map[string]bool{
+	"timestamp":  true,
+	"created_at": true,
+	"id":         true,
+	"level":      true,
+}
+
+const logInsertSQL = `
+	INSERT INTO logs (
+		host_id, level, message, fields, timestamp, created_at,
+		http_method, http_url, http_status, http_response_time_ms,
+		derived_level, derived_source, derived_category
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
 // LogRepository handles database operations for logs.
 type LogRepository struct {
 	db *Database
@@ -19,6 +35,25 @@ type LogRepository struct {
 // NewLogRepository creates a new LogRepository.
 func NewLogRepository(db *Database) *LogRepository {
 	return &LogRepository{db: db}
+}
+
+// logInsertArgs returns the ordered bind values for a log INSERT.
+func logInsertArgs(log *entities.Log) []any {
+	return []any{
+		log.HostID,
+		log.Level,
+		log.Message,
+		log.Fields,
+		log.Timestamp,
+		log.CreatedAt,
+		log.Method,
+		log.Path,
+		log.StatusCode,
+		log.Duration,
+		log.DerivedLevel,
+		log.DerivedSource,
+		log.DerivedCategory,
+	}
 }
 
 // LogFilters is an alias for ports.LogFilters for backward compatibility.
@@ -33,30 +68,7 @@ func (r *LogRepository) Create(log *entities.Log) error {
 		return fmt.Errorf("message is required")
 	}
 
-	query := `
-		INSERT INTO logs (
-			host_id, level, message, fields, timestamp, created_at,
-			http_method, http_url, http_status, http_response_time_ms,
-			derived_level, derived_source, derived_category
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`
-
-	result, err := r.db.Conn().Exec(
-		query,
-		log.HostID,
-		log.Level,
-		log.Message,
-		log.Fields,
-		log.Timestamp,
-		log.CreatedAt,
-		log.Method,
-		log.Path,
-		log.StatusCode,
-		log.Duration,
-		log.DerivedLevel,
-		log.DerivedSource,
-		log.DerivedCategory,
-	)
+	result, err := r.db.Conn().Exec(logInsertSQL, logInsertArgs(log)...)
 	if err != nil {
 		return fmt.Errorf("failed to insert log: %w", err)
 	}
@@ -89,13 +101,7 @@ func (r *LogRepository) BulkCreate(logs []*entities.Log) ([]int64, error) {
 	defer tx.Rollback()
 
 	// Prepare statement
-	stmt, err := tx.Prepare(`
-		INSERT INTO logs (
-			host_id, level, message, fields, timestamp, created_at,
-			http_method, http_url, http_status, http_response_time_ms,
-			derived_level, derived_source, derived_category
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`)
+	stmt, err := tx.Prepare(logInsertSQL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -104,21 +110,7 @@ func (r *LogRepository) BulkCreate(logs []*entities.Log) ([]int64, error) {
 	// Execute bulk insert
 	ids := make([]int64, len(logs))
 	for i, log := range logs {
-		result, err := stmt.Exec(
-			log.HostID,
-			log.Level,
-			log.Message,
-			log.Fields,
-			log.Timestamp,
-			log.CreatedAt,
-			log.Method,
-			log.Path,
-			log.StatusCode,
-			log.Duration,
-			log.DerivedLevel,
-			log.DerivedSource,
-			log.DerivedCategory,
-		)
+		result, err := stmt.Exec(logInsertArgs(log)...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to insert log %d: %w", i, err)
 		}
@@ -163,50 +155,48 @@ func (r *LogRepository) FindByID(id int64) (*entities.Log, error) {
 	return &log, nil
 }
 
-// FindAll retrieves logs with filters and eager-loads host data.
-func (r *LogRepository) FindAll(filters LogFilters) ([]*entities.Log, int, error) {
-	// Build WHERE clause
+// buildWhereClause constructs a SQL WHERE clause and argument slice from the given filters.
+// Returns an empty string and nil args when no filters are active.
+func buildWhereClause(filters LogFilters) (string, []interface{}) {
 	var whereClauses []string
 	var args []interface{}
-	var countArgs []interface{}
 
 	if filters.HostID != nil {
 		whereClauses = append(whereClauses, "l.host_id = ?")
 		args = append(args, *filters.HostID)
-		countArgs = append(countArgs, *filters.HostID)
 	}
 
 	if filters.Level != "" {
 		whereClauses = append(whereClauses, "l.level = ?")
 		args = append(args, filters.Level)
-		countArgs = append(countArgs, filters.Level)
 	}
 
 	if filters.Search != "" {
-		// Simple search on message and fields
 		searchTerm := "%" + filters.Search + "%"
 		whereClauses = append(whereClauses, "(l.message LIKE ? OR l.fields LIKE ?)")
 		args = append(args, searchTerm, searchTerm)
-		countArgs = append(countArgs, searchTerm, searchTerm)
 	}
 
 	if filters.FromDate != "" {
 		whereClauses = append(whereClauses, "l.timestamp >= ?")
 		args = append(args, filters.FromDate)
-		countArgs = append(countArgs, filters.FromDate)
 	}
 
 	if filters.ToDate != "" {
 		whereClauses = append(whereClauses, "l.timestamp <= ?")
 		args = append(args, filters.ToDate)
-		countArgs = append(countArgs, filters.ToDate)
 	}
 
-	// Build WHERE string
-	whereStr := ""
-	if len(whereClauses) > 0 {
-		whereStr = "WHERE " + strings.Join(whereClauses, " AND ")
+	if len(whereClauses) == 0 {
+		return "", nil
 	}
+
+	return "WHERE " + strings.Join(whereClauses, " AND "), args
+}
+
+// FindAll retrieves logs with filters and eager-loads host data.
+func (r *LogRepository) FindAll(filters LogFilters) ([]*entities.Log, int, error) {
+	whereStr, args := buildWhereClause(filters)
 
 	// Get total count (no JOIN needed — all WHERE filters reference logs columns only)
 	countQuery := fmt.Sprintf(`
@@ -216,7 +206,7 @@ func (r *LogRepository) FindAll(filters LogFilters) ([]*entities.Log, int, error
 	`, whereStr)
 
 	var total int
-	if err := r.db.Conn().QueryRow(countQuery, countArgs...).Scan(&total); err != nil {
+	if err := r.db.Conn().QueryRow(countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("failed to count logs: %w", err)
 	}
 
@@ -226,28 +216,11 @@ func (r *LogRepository) FindAll(filters LogFilters) ([]*entities.Log, int, error
 		orderBy = "timestamp"
 	}
 
-	allowedOrderBy := map[string]bool{
-		"timestamp":  true,
-		"created_at": true,
-		"id":         true,
-		"level":      true,
-	}
 	if !allowedOrderBy[orderBy] {
 		orderBy = "timestamp"
 	}
 
-	limit := filters.Limit
-	if limit <= 0 {
-		limit = constants.DefaultLimit
-	}
-	if limit > constants.MaxLimit {
-		limit = constants.MaxLimit
-	}
-
-	offset := filters.Offset
-	if offset < 0 {
-		offset = 0
-	}
+	limit, offset := constants.NormalizePagination(filters.Limit, filters.Offset)
 
 	query := fmt.Sprintf(`
 		SELECT l.id, l.host_id, l.level, l.message, l.fields, l.timestamp, l.created_at,
@@ -261,9 +234,11 @@ func (r *LogRepository) FindAll(filters LogFilters) ([]*entities.Log, int, error
 		LIMIT ? OFFSET ?
 	`, whereStr, orderBy)
 
-	args = append(args, limit, offset)
+	queryArgs := make([]interface{}, 0, len(args)+2)
+	queryArgs = append(queryArgs, args...)
+	queryArgs = append(queryArgs, limit, offset)
 
-	rows, err := r.db.Conn().Query(query, args...)
+	rows, err := r.db.Conn().Query(query, queryArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query logs: %w", err)
 	}

@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -54,6 +55,45 @@ type BulkCreateLogsResponse struct {
 	Success bool    `json:"success"`
 }
 
+// parseLogRequest validates a CreateLogRequest and constructs a Log entity.
+func parseLogRequest(req CreateLogRequest, hostID int64, now time.Time) (*entities.Log, error) {
+	if req.Message == "" {
+		return nil, fmt.Errorf("message is required")
+	}
+	if len(req.Message) > constants.MaxMessageLength {
+		return nil, fmt.Errorf("message too long (max %d characters)", constants.MaxMessageLength)
+	}
+	level := entities.LogLevelInfo
+	if req.Level != "" {
+		if !constants.IsValidLogLevel(req.Level) {
+			return nil, fmt.Errorf("invalid level. Must be one of: trace, debug, info, warn, error, fatal")
+		}
+		level = entities.LogLevel(req.Level)
+	}
+	var timestamp time.Time
+	if req.Timestamp != "" {
+		var err error
+		timestamp, err = time.Parse(time.RFC3339, req.Timestamp)
+		if err != nil {
+			return nil, fmt.Errorf("invalid timestamp format. Use ISO 8601 (RFC3339)")
+		}
+	}
+	if timestamp.IsZero() {
+		timestamp = now
+	}
+	if timestamp.After(now.Add(constants.FutureTimestampLimit)) {
+		return nil, fmt.Errorf("timestamp cannot be more than %v in the future", constants.FutureTimestampLimit)
+	}
+	return &entities.Log{
+		HostID:    hostID,
+		Level:     level,
+		Message:   req.Message,
+		Fields:    req.Fields,
+		Timestamp: timestamp,
+		CreatedAt: now,
+	}, nil
+}
+
 // CreateLogHandler handles POST /api/v1/logs - Create a new log entry.
 func CreateLogHandler(h *Handlers) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -71,55 +111,10 @@ func CreateLogHandler(h *Handlers) http.HandlerFunc {
 			return
 		}
 
-		// Validate required fields
-		if req.Message == "" {
-			http.Error(w, "Message is required", http.StatusBadRequest)
+		log, err := parseLogRequest(req, host.ID, time.Now())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
-		}
-
-		if len(req.Message) > constants.MaxMessageLength {
-			http.Error(w, "Message too long (max 10000 characters)", http.StatusBadRequest)
-			return
-		}
-
-		// Parse and validate level
-		level := entities.LogLevelInfo // Default
-		if req.Level != "" {
-			if !constants.IsValidLogLevel(req.Level) {
-				http.Error(w, "Invalid level. Must be one of: trace, debug, info, warn, error, fatal", http.StatusBadRequest)
-				return
-			}
-			level = entities.LogLevel(req.Level)
-		}
-
-		// Parse timestamp or use current time
-		var timestamp time.Time
-		if req.Timestamp != "" {
-			var err error
-			timestamp, err = time.Parse(time.RFC3339, req.Timestamp)
-			if err != nil {
-				http.Error(w, "Invalid timestamp format. Use ISO 8601 (RFC3339)", http.StatusBadRequest)
-				return
-			}
-		}
-		if timestamp.IsZero() {
-			timestamp = time.Now()
-		}
-
-		// Ensure timestamp is not in the future
-		if timestamp.After(time.Now().Add(constants.FutureTimestampLimit)) {
-			http.Error(w, "Timestamp cannot be more than 5 minutes in the future", http.StatusBadRequest)
-			return
-		}
-
-		// Create log entity
-		log := &entities.Log{
-			HostID:    host.ID,
-			Level:     level,
-			Message:   req.Message,
-			Fields:    req.Fields,
-			Timestamp: timestamp,
-			CreatedAt: time.Now(),
 		}
 
 		// Apply smart metadata derivation
@@ -151,12 +146,7 @@ func CreateLogHandler(h *Handlers) http.HandlerFunc {
 			HostID:  host.ID,
 			Success: true,
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			slog.Error("failed to encode response", "error", err)
-		}
+		writeJSON(w, http.StatusCreated, resp)
 	}
 }
 
@@ -184,60 +174,21 @@ func CreateBulkLogsHandler(h *Handlers) http.HandlerFunc {
 		}
 
 		if len(req.Logs) > constants.MaxBulkLogCount {
-			http.Error(w, "Too many logs. Maximum is 1000 per request", http.StatusBadRequest)
+			http.Error(w, fmt.Sprintf("Too many logs. Maximum is %d per request", constants.MaxBulkLogCount), http.StatusBadRequest)
 			return
 		}
 
 		// Convert to log entities
+		now := time.Now()
 		logs := make([]*entities.Log, len(req.Logs))
 		for i, logReq := range req.Logs {
-			// Validate message
-			if logReq.Message == "" {
-				http.Error(w, "Log "+strconv.Itoa(i)+": message is required", http.StatusBadRequest)
+			log, err := parseLogRequest(logReq, host.ID, now)
+			if err != nil {
+				http.Error(w, "Log "+strconv.Itoa(i)+": "+err.Error(), http.StatusBadRequest)
 				return
 			}
-
-			if len(logReq.Message) > constants.MaxMessageLength {
-				http.Error(w, "Log "+strconv.Itoa(i)+": message too long", http.StatusBadRequest)
-				return
-			}
-
-			// Parse level
-			level := entities.LogLevelInfo
-			if logReq.Level != "" {
-				if !constants.IsValidLogLevel(logReq.Level) {
-					http.Error(w, "Log "+strconv.Itoa(i)+": invalid level", http.StatusBadRequest)
-					return
-				}
-				level = entities.LogLevel(logReq.Level)
-			}
-
-			// Parse timestamp
-			var timestamp time.Time
-			if logReq.Timestamp != "" {
-				var err error
-				timestamp, err = time.Parse(time.RFC3339, logReq.Timestamp)
-				if err != nil {
-					http.Error(w, "Log "+strconv.Itoa(i)+": invalid timestamp", http.StatusBadRequest)
-					return
-				}
-			}
-			if timestamp.IsZero() {
-				timestamp = time.Now()
-			}
-
-			// Create log entity
-			logs[i] = &entities.Log{
-				HostID:    host.ID,
-				Level:     level,
-				Message:   logReq.Message,
-				Fields:    logReq.Fields,
-				Timestamp: timestamp,
-				CreatedAt: time.Now(),
-			}
-
-			// Apply smart metadata derivation (mirrors single-log path)
-			h.patternMatcher.Analyze(logs[i])
+			h.patternMatcher.Analyze(log)
+			logs[i] = log
 		}
 
 		// Save to database
@@ -267,11 +218,7 @@ func CreateBulkLogsHandler(h *Handlers) http.HandlerFunc {
 			Success: true,
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			slog.Error("failed to encode response", "error", err)
-		}
+		writeJSON(w, http.StatusCreated, resp)
 	}
 }
 
@@ -279,6 +226,8 @@ func CreateBulkLogsHandler(h *Handlers) http.HandlerFunc {
 func ListLogsHandler(h *Handlers) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		filters := parseLogFilters(r)
+
+		filters.Limit, filters.Offset = constants.NormalizePagination(filters.Limit, filters.Offset)
 
 		// Validate level if provided
 		if filters.Level != "" && !constants.IsValidLogLevel(filters.Level) {
@@ -299,15 +248,12 @@ func ListLogsHandler(h *Handlers) http.HandlerFunc {
 			resp[i] = logToResponse(log)
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]any{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"logs":   resp,
 			"total":  total,
 			"limit":  filters.Limit,
 			"offset": filters.Offset,
-		}); err != nil {
-			slog.Error("failed to encode response", "error", err)
-		}
+		})
 	}
 }
 
@@ -333,10 +279,7 @@ func GetLogHandler(h *Handlers) http.HandlerFunc {
 		}
 
 		resp := logToResponse(log)
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			slog.Error("failed to encode response", "error", err)
-		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 

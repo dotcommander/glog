@@ -82,6 +82,15 @@ func (db *Database) Path() string {
 	return db.path
 }
 
+// Size returns the database file size in bytes.
+func (db *Database) Size() int64 {
+	fi, err := os.Stat(db.path)
+	if err != nil {
+		return 0
+	}
+	return fi.Size()
+}
+
 // Close closes the database connection.
 func (db *Database) Close() error {
 	if db.conn == nil {

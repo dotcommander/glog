@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -164,11 +163,7 @@ func RegisterHostHandler(h *Handlers) http.HandlerFunc {
 		h.BroadcastHostRegistered(resp)
 
 		// Return response
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			slog.Error("failed to encode response", "error", err)
-		}
+		writeJSON(w, http.StatusCreated, resp)
 	}
 }
 
@@ -187,13 +182,7 @@ func ListHostsHandler(h *Handlers) http.HandlerFunc {
 			resp[i] = hostToResponse(host)
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"hosts": resp,
-			"total": len(resp),
-		}); err != nil {
-			slog.Error("failed to encode response", "error", err)
-		}
+		writeJSON(w, http.StatusOK, map[string]any{"hosts": resp, "total": len(resp)})
 	}
 }
 
@@ -219,10 +208,7 @@ func GetHostHandler(h *Handlers) http.HandlerFunc {
 		}
 
 		resp := hostToResponse(host)
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			slog.Error("failed to encode response", "error", err)
-		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
@@ -272,9 +258,6 @@ func GetHostStatsHandler(h *Handlers) http.HandlerFunc {
 			stats.LastLogTime = logStats.LastLogTime.Format(time.RFC3339)
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(stats); err != nil {
-			slog.Error("failed to encode response", "error", err)
-		}
+		writeJSON(w, http.StatusOK, stats)
 	}
 }
