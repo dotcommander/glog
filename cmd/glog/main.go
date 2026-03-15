@@ -40,6 +40,7 @@ func main() {
 		commands.MigrateCmd(),
 		commands.HostCmd(),
 		commands.LogCmd(),
+		commands.TailCmd(),
 		commands.VersionCmd(),
 	)
 
