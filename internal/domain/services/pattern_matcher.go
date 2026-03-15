@@ -1,7 +1,10 @@
 package services
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"regexp"
+	"strings"
 
 	"github.com/dotcommander/glog/internal/domain/entities"
 )
@@ -16,6 +19,21 @@ var severityOrder = []entities.LogLevel{
 	entities.LogLevelDebug,
 	entities.LogLevelTrace,
 }
+
+// Fingerprint normalization patterns — compiled once at package level.
+var (
+	fpUUID      = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+	fpEmail     = regexp.MustCompile(`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`)
+	fpIP        = regexp.MustCompile(`\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b`)
+	fpTimestamp = regexp.MustCompile(`\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}([.\d]*)?([Zz]|[+\-]\d{2}:?\d{2})?`)
+	fpDate      = regexp.MustCompile(`\b\d{4}-\d{2}-\d{2}\b`)
+	fpHex       = regexp.MustCompile(`\b[0-9a-fA-F]{8,}\b`)
+	fpQuotedDbl = regexp.MustCompile(`"[^"]*"`)
+	fpQuotedSgl = regexp.MustCompile(`'[^']*'`)
+	fpPath      = regexp.MustCompile(`/\S+`)
+	fpNumber    = regexp.MustCompile(`\b\d+\b`)
+	fpSpaces    = regexp.MustCompile(`\s+`)
+)
 
 // PatternMatcher analyzes log messages to derive metadata.
 type PatternMatcher struct {
@@ -165,6 +183,34 @@ func (pm *PatternMatcher) Analyze(log *entities.Log) {
 			log.DerivedCategory = &category
 		}
 	}
+
+	// Compute fingerprint
+	log.Fingerprint = pm.Fingerprint(message)
+}
+
+// Fingerprint normalizes a log message by replacing variable tokens with
+// placeholders, then returns the first 16 hex characters of a SHA-256 hash
+// of the normalized string.
+func (pm *PatternMatcher) Fingerprint(message string) string {
+	s := strings.ToLower(message)
+
+	// Order matters: replace more specific patterns first to avoid
+	// partial matches by broader patterns (e.g., UUIDs before hex).
+	s = fpUUID.ReplaceAllString(s, "<uuid>")
+	s = fpEmail.ReplaceAllString(s, "<email>")
+	s = fpIP.ReplaceAllString(s, "<ip>")
+	s = fpTimestamp.ReplaceAllString(s, "<timestamp>")
+	s = fpDate.ReplaceAllString(s, "<timestamp>")
+	s = fpHex.ReplaceAllString(s, "<hex>")
+	s = fpQuotedDbl.ReplaceAllString(s, "<str>")
+	s = fpQuotedSgl.ReplaceAllString(s, "<str>")
+	s = fpPath.ReplaceAllString(s, "<path>")
+	s = fpNumber.ReplaceAllString(s, "<n>")
+	s = fpSpaces.ReplaceAllString(s, " ")
+	s = strings.TrimSpace(s)
+
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])[:16]
 }
 
 // deriveSeverity analyzes the message to determine the appropriate log level.

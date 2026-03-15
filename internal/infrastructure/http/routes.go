@@ -111,6 +111,7 @@ func NewRouter(deps *RouterDeps, config *Config) chi.Router {
 		r.Get("/hosts/{id}", handlers.GetHostHandler(h))
 		r.Get("/hosts/{id}/stats", handlers.GetHostStatsHandler(h))
 		r.Get("/logs", handlers.ListLogsHandler(h))
+		r.Get("/logs/groups", handlers.ListGroupedLogsHandler(h))
 		r.Get("/logs/{id}", handlers.GetLogHandler(h))
 		r.Get("/events", handlers.SSEStreamHandler(h))
 

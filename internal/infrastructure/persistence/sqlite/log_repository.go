@@ -23,8 +23,8 @@ const logInsertSQL = `
 	INSERT INTO logs (
 		host_id, level, message, fields, timestamp, created_at,
 		http_method, http_url, http_status, http_response_time_ms,
-		derived_level, derived_source, derived_category
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		derived_level, derived_source, derived_category, fingerprint
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 // LogRepository handles database operations for logs.
@@ -53,6 +53,7 @@ func logInsertArgs(log *entities.Log) []any {
 		log.DerivedLevel,
 		log.DerivedSource,
 		log.DerivedCategory,
+		log.Fingerprint,
 	}
 }
 
@@ -137,7 +138,7 @@ func (r *LogRepository) FindByID(id int64) (*entities.Log, error) {
 	query := `
 		SELECT l.id, l.host_id, l.level, l.message, l.fields, l.timestamp, l.created_at,
 		       l.http_method, l.http_url, l.http_status, l.http_response_time_ms,
-		       l.derived_level, l.derived_source, l.derived_category,
+		       l.derived_level, l.derived_source, l.derived_category, l.fingerprint,
 		       h.id, h.name, h.tags, h.status, h.last_seen
 		FROM logs l
 		JOIN hosts h ON l.host_id = h.id
@@ -225,7 +226,7 @@ func (r *LogRepository) FindAll(filters LogFilters) ([]*entities.Log, int, error
 	query := fmt.Sprintf(`
 		SELECT l.id, l.host_id, l.level, l.message, l.fields, l.timestamp, l.created_at,
 		       l.http_method, l.http_url, l.http_status, l.http_response_time_ms,
-		       l.derived_level, l.derived_source, l.derived_category,
+		       l.derived_level, l.derived_source, l.derived_category, l.fingerprint,
 		       h.id, h.name, h.tags, h.status, h.last_seen
 		FROM logs l
 		JOIN hosts h ON l.host_id = h.id
@@ -394,6 +395,7 @@ func (r *LogRepository) scanLogWithHost(scanner interface{ Scan(...interface{}) 
 
 	var fieldsJSON string
 	var derivedLevel, derivedSource, derivedCategory sql.NullString
+	var fingerprint sql.NullString
 	var tagsJSON string
 	var method, path sql.NullString
 
@@ -412,6 +414,7 @@ func (r *LogRepository) scanLogWithHost(scanner interface{ Scan(...interface{}) 
 		&derivedLevel,
 		&derivedSource,
 		&derivedCategory,
+		&fingerprint,
 		&log.Host.ID,
 		&log.Host.Name,
 		&tagsJSON,
@@ -449,6 +452,80 @@ func (r *LogRepository) scanLogWithHost(scanner interface{ Scan(...interface{}) 
 	if derivedCategory.Valid {
 		log.DerivedCategory = &derivedCategory.String
 	}
+	if fingerprint.Valid {
+		log.Fingerprint = fingerprint.String
+	}
 
 	return nil
+}
+
+// FindGrouped returns logs grouped by fingerprint with counts and time range.
+func (r *LogRepository) FindGrouped(filters LogFilters) ([]ports.GroupedLog, int, error) {
+	whereStr, args := buildWhereClause(filters)
+
+	fpFilter := "l.fingerprint IS NOT NULL AND l.fingerprint != ''"
+	if whereStr == "" {
+		whereStr = "WHERE " + fpFilter
+	} else {
+		whereStr += " AND " + fpFilter
+	}
+
+	countQuery := fmt.Sprintf(`SELECT COUNT(DISTINCT l.fingerprint) FROM logs l %s`, whereStr)
+	var total int
+	if err := r.db.Conn().QueryRow(countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count grouped logs: %w", err)
+	}
+
+	limit, offset := constants.NormalizePagination(filters.Limit, filters.Offset)
+
+	// Use MAX on a severity rank to return the highest severity level name
+	// deterministically, instead of relying on SQLite's arbitrary non-aggregated
+	// column behavior. l.message and l.host_id are representative (same
+	// fingerprint = same normalized pattern).
+	query := fmt.Sprintf(`
+		SELECT l.fingerprint, COUNT(*) as cnt,
+		       CASE MAX(CASE l.level
+		           WHEN 'fatal' THEN 6 WHEN 'error' THEN 5 WHEN 'warn' THEN 4
+		           WHEN 'info' THEN 3 WHEN 'debug' THEN 2 WHEN 'trace' THEN 1 ELSE 0 END)
+		           WHEN 6 THEN 'fatal' WHEN 5 THEN 'error' WHEN 4 THEN 'warn'
+		           WHEN 3 THEN 'info' WHEN 2 THEN 'debug' WHEN 1 THEN 'trace'
+		           ELSE 'info' END as level,
+		       l.message,
+		       MIN(l.timestamp) as first_seen, MAX(l.timestamp) as last_seen,
+		       l.host_id, h.name
+		FROM logs l
+		JOIN hosts h ON l.host_id = h.id
+		%s
+		GROUP BY l.fingerprint
+		ORDER BY last_seen DESC
+		LIMIT ? OFFSET ?
+	`, whereStr)
+
+	queryArgs := make([]interface{}, 0, len(args)+2)
+	queryArgs = append(queryArgs, args...)
+	queryArgs = append(queryArgs, limit, offset)
+
+	rows, err := r.db.Conn().Query(query, queryArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query grouped logs: %w", err)
+	}
+	defer rows.Close()
+
+	var groups []ports.GroupedLog
+	for rows.Next() {
+		var g ports.GroupedLog
+		if err := rows.Scan(
+			&g.Fingerprint, &g.Count, &g.Level, &g.Message,
+			&g.FirstSeen, &g.LastSeen, &g.HostID, &g.HostName,
+		); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan grouped log: %w", err)
+		}
+		groups = append(groups, g)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("error iterating grouped logs: %w", err)
+	}
+
+	return groups, total, nil
 }

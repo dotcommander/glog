@@ -307,3 +307,29 @@ func logToResponse(log *entities.Log) LogResponse {
 
 	return resp
 }
+
+// ListGroupedLogsHandler handles GET /api/v1/logs/groups - Query grouped logs by fingerprint.
+func ListGroupedLogsHandler(h *Handlers) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		filters := parseLogFilters(r)
+		filters.Limit, filters.Offset = constants.NormalizePagination(filters.Limit, filters.Offset)
+
+		if filters.Level != "" && !constants.IsValidLogLevel(filters.Level) {
+			http.Error(w, "Invalid level. Must be one of: trace, debug, info, warn, error, fatal", http.StatusBadRequest)
+			return
+		}
+
+		groups, total, err := h.logRepo.FindGrouped(filters)
+		if err != nil {
+			http.Error(w, "Failed to fetch grouped logs: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"groups": groups,
+			"total":  total,
+			"limit":  filters.Limit,
+			"offset": filters.Offset,
+		})
+	}
+}

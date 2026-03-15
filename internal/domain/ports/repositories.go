@@ -72,6 +72,18 @@ type HostLogStats struct {
 	LogsThisWeek int64
 }
 
+// GroupedLog represents a group of logs sharing the same fingerprint.
+type GroupedLog struct {
+	Fingerprint string    `json:"fingerprint"`
+	Count       int       `json:"count"`
+	Level       string    `json:"level"`
+	Message     string    `json:"message"`
+	FirstSeen   time.Time `json:"first_seen"`
+	LastSeen    time.Time `json:"last_seen"`
+	HostID      int64     `json:"host_id"`
+	HostName    string    `json:"host_name"`
+}
+
 // LogRepository defines operations for log persistence.
 type LogRepository interface {
 	// Create inserts a new log entry.
@@ -109,5 +121,8 @@ type LogRepository interface {
 
 	// GetHostStats returns aggregated log statistics for a host in a single query.
 	GetHostStats(hostID int64) (*HostLogStats, error)
+
+	// FindGrouped returns logs grouped by fingerprint with counts and time range.
+	FindGrouped(filters LogFilters) ([]GroupedLog, int, error)
 }
 

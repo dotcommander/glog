@@ -62,6 +62,7 @@ type Log struct {
 	DerivedLevel    *string `json:"derived_level,omitempty"`
 	DerivedSource   *string `json:"derived_source,omitempty"`
 	DerivedCategory *string `json:"derived_category,omitempty"`
+	Fingerprint     string  `json:"fingerprint,omitempty"`
 
 	// Eager-loaded host (for API responses)
 	Host *Host `json:"host,omitempty"`
