@@ -40,6 +40,10 @@ serve: build-web
 doctor:
     {{bin}} doctor --server http://{{addr}}
 
+# Open the dashboard in the default browser.
+dashboard:
+    open "http://{{addr}}"
+
 # Install and start the macOS launchd user service.
 service-install: build
     mkdir -p "{{home}}/Library/LaunchAgents"
