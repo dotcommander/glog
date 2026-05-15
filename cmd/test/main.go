@@ -31,20 +31,23 @@ func main() {
 	// Create repositories
 	hostRepo := sqlite.NewHostRepository(db)
 	logRepo := sqlite.NewLogRepository(db)
+	inboxRepo := sqlite.NewInboxRepository(db)
 
 	// Create SSE hub
 	hub := sse.NewHub()
 
 	// Create handlers with dependency injection
 	h := handlers.NewHandlers(hostRepo, logRepo, hub)
+	h.SetInboxRepo(inboxRepo)
 
 	// Create router dependencies
 	deps := &http.RouterDeps{
-		DB:       db,
-		HostRepo: hostRepo,
-		LogRepo:  logRepo,
-		Hub:      hub,
-		Handlers: h,
+		DB:        db,
+		HostRepo:  hostRepo,
+		LogRepo:   logRepo,
+		InboxRepo: inboxRepo,
+		Hub:       hub,
+		Handlers:  h,
 	}
 
 	// Create HTTP server

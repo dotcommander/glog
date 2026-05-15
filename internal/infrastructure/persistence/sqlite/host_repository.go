@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/dotcommander/glog/internal/constants"
 	"github.com/dotcommander/glog/internal/domain/entities"
 	"github.com/dotcommander/glog/internal/domain/ports"
 )
@@ -152,11 +153,17 @@ func (r *HostRepository) FindByName(name string) (*entities.Host, error) {
 	return &host, nil
 }
 
-// List retrieves all hosts.
-func (r *HostRepository) List() ([]*entities.Host, error) {
-	query := `SELECT ` + hostColumns + ` FROM hosts ORDER BY created_at DESC`
+// List retrieves hosts. Internal hosts are excluded unless includeInternal is true.
+func (r *HostRepository) List(includeInternal bool) ([]*entities.Host, error) {
+	query := `SELECT ` + hostColumns + ` FROM hosts`
+	var args []any
+	if !includeInternal {
+		query += ` WHERE name != ?`
+		args = append(args, constants.InternalHost)
+	}
+	query += ` ORDER BY created_at DESC`
 
-	rows, err := r.db.Conn().Query(query)
+	rows, err := r.db.Conn().Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query hosts: %w", err)
 	}
@@ -251,7 +258,7 @@ func (r *HostRepository) IncrementLogCounters(hostID int64, totalNew int64, erro
 			error_count = error_count + ?,
 			error_rate = CASE
 				WHEN (log_count + ?) > 0
-				THEN CAST((error_count + ?) AS REAL) / CAST((log_count + ?) AS REAL) * 100
+				THEN CAST((error_count + ?) AS REAL) / CAST((log_count + ?) AS REAL)
 				ELSE 0
 			END
 		WHERE id = ?

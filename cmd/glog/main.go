@@ -30,8 +30,8 @@ func main() {
 
 	rootCmd := &cobra.Command{
 		Use:     "glog",
-		Short:   "Minimalist multi-host log utility and dashboard",
-		Long:    "A minimalist, Papertrail-inspired centralized logging solution for multi-host environments",
+		Short:   "Local-first log utility, dashboard, and agent debugging workspace",
+		Long:    "A local-first log utility with a live dashboard, SQLite storage, and agent debugging workflows",
 		Version: Version,
 	}
 
@@ -39,6 +39,9 @@ func main() {
 		commands.ServeCmd(),
 		commands.MigrateCmd(),
 		commands.HostCmd(),
+		commands.InspectCmd(),
+		commands.InboxCmd(),
+		commands.DoctorCmd(),
 		commands.LogCmd(),
 		commands.TailCmd(),
 		commands.VersionCmd(),

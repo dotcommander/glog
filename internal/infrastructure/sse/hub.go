@@ -44,6 +44,9 @@ func (h *Hub) AddClient(client chan<- Event) {
 func (h *Hub) RemoveClient(client chan<- Event) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if _, ok := h.clients[client]; !ok {
+		return
+	}
 	delete(h.clients, client)
 	close(client)
 }

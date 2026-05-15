@@ -47,6 +47,44 @@ export interface LogFilters {
   offset?: number;
 }
 
+export interface LogBucket {
+  bucket_start: string;
+  bucket_width: string;
+  host_id: number;
+  level: Log['level'];
+  count: number;
+}
+
+export interface FingerprintBucket {
+  bucket_start: string;
+  bucket_width: string;
+  fingerprint: string;
+  level: Log['level'];
+  count: number;
+  first_seen: string;
+  last_seen: string;
+}
+
+export interface InboxItem {
+  id: number;
+  title: string;
+  body?: string;
+  status: 'open' | 'in_progress' | 'blocked' | 'done' | 'dismissed';
+  kind: 'note' | 'task' | 'question' | 'bug' | 'handoff';
+  priority: 'low' | 'normal' | 'high';
+  source?: string;
+  repo?: string;
+  session_id?: string;
+  tags: string[];
+  linked_log_ids: string[];
+  linked_fingerprints: string[];
+  created_by?: string;
+  claimed_by?: string;
+  created_at: string;
+  updated_at: string;
+  due_at?: string;
+}
+
 export interface SSEEvent {
   event: string;
   data: any;

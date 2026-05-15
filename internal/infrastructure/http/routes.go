@@ -23,11 +23,12 @@ import (
 
 // RouterDeps holds dependencies for creating the router.
 type RouterDeps struct {
-	DB       *sqlite.Database
-	HostRepo ports.HostRepository
-	LogRepo  ports.LogRepository
-	Hub      *sse.Hub
-	Handlers *handlers.Handlers
+	DB        *sqlite.Database
+	HostRepo  ports.HostRepository
+	LogRepo   ports.LogRepository
+	InboxRepo ports.InboxRepository
+	Hub       *sse.Hub
+	Handlers  *handlers.Handlers
 }
 
 // apiKeyAuthMiddleware creates middleware that validates API keys.
@@ -114,6 +115,14 @@ func NewRouter(deps *RouterDeps, config *Config) chi.Router {
 		r.Get("/logs/groups", handlers.ListGroupedLogsHandler(h))
 		r.Get("/logs/{id}", handlers.GetLogHandler(h))
 		r.Get("/events", handlers.SSEStreamHandler(h))
+		r.Get("/stats/logs", handlers.LogBucketsHandler(h))
+		r.Get("/stats/fingerprints", handlers.FingerprintBucketsHandler(h))
+		r.Get("/inbox", handlers.ListInboxItemsHandler(h))
+		r.Post("/inbox", handlers.CreateInboxItemHandler(h))
+		r.Get("/inbox/{id}", handlers.GetInboxItemHandler(h))
+		r.Patch("/inbox/{id}", handlers.UpdateInboxItemHandler(h))
+		r.Delete("/inbox/{id}", handlers.DeleteInboxItemHandler(h))
+		r.Post("/inbox/{id}/done", handlers.CompleteInboxItemHandler(h))
 
 		// Authenticated routes
 		r.With(apiKeyAuthMiddleware(deps.HostRepo)).Post("/logs", handlers.CreateLogHandler(h))

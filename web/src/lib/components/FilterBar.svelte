@@ -68,23 +68,23 @@
   });
 </script>
 
-<div class="bg-white border-b border-gray-200 p-4">
-  <div class="flex flex-col space-y-4">
+<div class="bg-white border-b border-gray-200 px-4 py-3">
+  <div class="flex flex-col gap-3">
     <!-- Search and main controls -->
-    <div class="flex items-center space-x-4">
+    <div class="flex flex-col gap-3 md:flex-row md:items-center">
       <!-- Search -->
-      <div class="flex-1 relative">
+      <div class="relative min-w-0 flex-1">
         <input
           id="search-input"
           type="text"
           bind:value={searchInput}
           oninput={applySearch}
           placeholder="Search logs... (Ctrl+K)"
-          class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          class="h-9 w-full rounded-md border border-gray-300 px-3 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
         {#if searchInput}
           <button
-            class="absolute right-2 top-2 text-gray-400 hover:text-gray-600"
+            class="absolute right-2 top-1.5 h-6 w-6 rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600"
             onclick={clearSearch}>
             ✕
           </button>
@@ -93,7 +93,7 @@
 
       <!-- Host selector -->
       <select
-        class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+        class="h-9 w-full rounded-md border border-gray-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 md:w-52"
         value={filtersStore.filters.host_id || ''}
         onchange={(e) => {
           const value = (e.target as HTMLSelectElement).value;
@@ -106,11 +106,11 @@
       </select>
 
       <!-- Date range picker -->
-      <div class="relative">
+      <div class="relative flex gap-2 md:block">
         <button
-          class="px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+          class="h-9 flex-1 rounded-md bg-gray-100 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 md:flex-none"
           onclick={() => showDatePicker = !showDatePicker}>
-          📅
+          Date
           {#if filtersStore.filters.start_date || filtersStore.filters.end_date}
             <span class="ml-2 text-xs bg-blue-500 text-white px-2 py-0.5 rounded-full">
               1
@@ -119,7 +119,7 @@
         </button>
 
         {#if showDatePicker}
-          <div class="absolute top-10 right-0 bg-white border border-gray-200 rounded-lg shadow-lg p-4 z-10 min-w-80">
+          <div class="absolute right-0 top-10 z-10 w-[calc(100vw-2rem)] max-w-80 rounded-md border border-gray-200 bg-white p-4 shadow-lg md:w-80">
             <div class="space-y-3">
               <div>
                 <label for="start-date" class="block text-sm font-medium text-gray-700 mb-1">From</label>
@@ -127,7 +127,7 @@
                   id="start-date"
                   type="datetime-local"
                   bind:value={startDate}
-                  class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  class="w-full rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
               <div>
@@ -136,7 +136,7 @@
                   id="end-date"
                   type="datetime-local"
                   bind:value={endDate}
-                  class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  class="w-full rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
               <div class="flex space-x-2">
@@ -159,7 +159,7 @@
       <!-- Clear all filters -->
       {#if filtersStore.hasActiveFilters}
         <button
-          class="px-3 py-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
+          class="h-9 rounded-md px-3 text-sm text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 md:shrink-0"
           onclick={() => {
             filtersStore.clearFilters();
             searchInput = '';
@@ -172,17 +172,17 @@
     </div>
 
     <!-- Level filters -->
-    <div class="flex items-center space-x-2">
-      <span class="text-sm text-gray-600 mr-2">Level:</span>
+    <div class="flex items-start gap-2 overflow-x-auto pb-1 md:flex-wrap md:items-center md:overflow-visible md:pb-0">
+      <span class="shrink-0 text-sm text-gray-600 md:mr-2">Level:</span>
       {#each levels as level}
-        <label class="flex items-center space-x-1 cursor-pointer">
+        <label class="flex shrink-0 cursor-pointer items-center gap-1">
           <input
             type="checkbox"
             checked={filtersStore.filters.level?.includes(level.value) || false}
             onchange={() => toggleLevel(level.value)}
             class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
           />
-          <span class="text-sm px-2 py-0.5 rounded
+          <span class="rounded px-2 py-0.5 text-sm
             {level.value === 'trace' ? 'bg-purple-100 text-purple-700' :
              level.value === 'debug' ? 'bg-blue-100 text-blue-700' :
              level.value === 'info' ? 'bg-green-100 text-green-700' :
@@ -197,9 +197,9 @@
 
     <!-- Active filters summary -->
     {#if filtersStore.hasActiveFilters}
-      <div class="flex items-center space-x-2 text-sm text-gray-600">
+      <div class="flex flex-wrap items-center gap-2 text-sm text-gray-600">
         <span>Active filters:</span>
-        <div class="flex items-center space-x-2">
+        <div class="flex flex-wrap items-center gap-2">
           {#if filtersStore.filters.level && filtersStore.filters.level.length > 0}
             <span class="px-2 py-0.5 bg-gray-100 rounded">
               Level: {filtersStore.filters.level.join(', ')}

@@ -8,7 +8,7 @@ GLog follows a **two-layer Clean Architecture** pattern that separates business 
 ┌─────────────────────────────────────────────────────────────────┐
 │                         Domain Layer                             │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │  entities/        - Business entities (Host, Log, JSONMap) │  │
+│  │  entities/        - Business entities (Host, Log, InboxItem)│  │
 │  │  ports/          - Repository interfaces (contracts)       │  │
 │  │  services/       - Business logic (matching, derivation)   │  │
 │  │  valueobjects/   - Value objects (Severity, levels)        │  │
@@ -49,17 +49,17 @@ GLog follows a **two-layer Clean Architecture** pattern that separates business 
 ┌────────────────────────────────────────────────────────────────┐
 │                      Repository Layer                           │
 │  ┌──────────────────────┐  ┌──────────────────────────────┐   │
-│  │   HostRepository     │  │    LogRepository             │   │
-│  │  (SQLite impl)       │  │    (SQLite impl)             │   │
-│  └──────────┬───────────┘  └──────────────┬───────────────┘   │
-└─────────────┼─────────────────────────────┼───────────────────┘
-              │                             │
-              │ reads/writes                │ reads/writes
-              ▼                             ▼
-      ┌───────────────┐           ┌───────────────┐
-      │ hosts table   │           │  logs table   │
-      │  (SQLite WAL) │           │  (SQLite WAL) │
-      └───────────────┘           └───────────────┘
+│  │ HostRepository │  │ LogRepository  │  │ InboxRepository │ │
+│  │ (SQLite impl)  │  │ (SQLite impl)  │  │ (SQLite impl)   │ │
+│  └───────┬────────┘  └───────┬────────┘  └────────┬────────┘ │
+└──────────┼───────────────────┼────────────────────┼──────────┘
+           │                   │                    │
+           │ reads/writes      │ reads/writes       │ reads/writes
+           ▼                   ▼                    ▼
+   ┌───────────────┐   ┌───────────────┐    ┌────────────────┐
+   │ hosts table   │   │  logs table   │    │ inbox_items    │
+   │  (SQLite WAL) │   │  (SQLite WAL) │    │  (SQLite WAL)  │
+   └───────────────┘   └───────────────┘    └────────────────┘
 
 ┌────────────────────────────────────────────────────────────────┐
 │                      Supporting Systems                         │
@@ -95,6 +95,8 @@ GLog follows a **two-layer Clean Architecture** pattern that separates business 
 - Easy backup and migration path to PostgreSQL
 
 **See**: [Database Design](database-design.md) for configuration and migration path
+
+**See also**: [GLog Invariants](invariants.md) for behavior that future storage and API changes must preserve.
 
 ### Why Server-Sent Events (SSE)?
 
@@ -182,6 +184,27 @@ Client POST /api/v1/hosts
           ▼
     Return 201 Created + API key
 ```
+
+### Agent inbox flow
+
+```
+Agent/UI POST /api/v1/inbox
+        │
+        ▼
+┌───────────────────┐
+│  Inbox Handler    │─▶ Validate title/status/kind/priority
+└─────────┬─────────┘
+          │
+          ▼
+┌─────────────────────────────┐
+│  InboxRepository.Create()   │─▶ Insert coordination item
+└─────────┬───────────────────┘
+          │
+          ▼
+    Return 201 Created
+```
+
+Inbox items are stateful coordination objects for agent notes, tasks, questions, bugs, and handoffs. They can carry `repo`, `session_id`, tags, linked log IDs, and linked fingerprints, but they do not replace raw logs as debugging evidence.
 
 ## Dependency rules
 
@@ -291,6 +314,7 @@ logger.LogSQLError("FindByAPIKey", query, err)
 
 - **Write operations**: Bearer token required (API key)
 - **Read operations**: Public (no authentication)
+- **Inbox operations**: Public in the current local-first implementation
 - **API key format**: `glog_v1_<46-char-hex>`
 
 ### Input validation

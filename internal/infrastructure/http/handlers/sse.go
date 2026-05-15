@@ -21,9 +21,17 @@ func SSEStreamHandler(h *Handlers) http.HandlerFunc {
 
 		// Register client
 		h.hub.AddClient(client)
+		if h.recorder != nil {
+			h.recorder.Record("sse.client_connected", map[string]any{"clients": h.hub.ClientCount()})
+		}
 
 		// Ensure cleanup on disconnect
-		defer h.hub.RemoveClient(client)
+		defer func() {
+			h.hub.RemoveClient(client)
+			if h.recorder != nil {
+				h.recorder.Record("sse.client_disconnected", map[string]any{"clients": h.hub.ClientCount()})
+			}
+		}()
 
 		// Send initial connection event
 		connectEvent := sse.Event{

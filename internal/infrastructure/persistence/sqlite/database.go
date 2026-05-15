@@ -16,12 +16,30 @@ import (
 
 // Database wraps a SQLite database connection.
 type Database struct {
-	conn *sql.DB
-	path string
+	conn              *sql.DB
+	path              string
+	durabilityProfile string
+}
+
+// Options configures SQLite database behavior.
+type Options struct {
+	DurabilityProfile string
 }
 
 // New creates a new Database connection.
 func New(path string) (*Database, error) {
+	return NewWithOptions(path, Options{DurabilityProfile: constants.DurabilityBalanced})
+}
+
+// NewWithOptions creates a new Database connection with explicit options.
+func NewWithOptions(path string, opts Options) (*Database, error) {
+	if opts.DurabilityProfile == "" {
+		opts.DurabilityProfile = constants.DurabilityBalanced
+	}
+	if !constants.IsValidDurabilityProfile(opts.DurabilityProfile) {
+		return nil, fmt.Errorf("invalid durability profile %q", opts.DurabilityProfile)
+	}
+
 	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -46,6 +64,11 @@ func New(path string) (*Database, error) {
 		return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
 	}
 
+	if _, err := conn.Exec("PRAGMA synchronous = " + synchronousModeForProfile(opts.DurabilityProfile)); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to set synchronous mode: %w", err)
+	}
+
 	// Set busy timeout to handle transient locks (retry for 5 seconds)
 	if _, err := conn.Exec(fmt.Sprintf("PRAGMA busy_timeout = %d", constants.DBBusyTimeout)); err != nil {
 		conn.Close()
@@ -65,11 +88,23 @@ func New(path string) (*Database, error) {
 	}
 
 	db := &Database{
-		conn: conn,
-		path: path,
+		conn:              conn,
+		path:              path,
+		durabilityProfile: opts.DurabilityProfile,
 	}
 
 	return db, nil
+}
+
+func synchronousModeForProfile(profile string) string {
+	switch profile {
+	case constants.DurabilityStrict:
+		return "FULL"
+	case constants.DurabilityFast:
+		return "OFF"
+	default:
+		return "NORMAL"
+	}
 }
 
 // Conn returns the underlying database connection.
@@ -80,6 +115,11 @@ func (db *Database) Conn() *sql.DB {
 // Path returns the database file path.
 func (db *Database) Path() string {
 	return db.path
+}
+
+// DurabilityProfile returns the configured durability profile.
+func (db *Database) DurabilityProfile() string {
+	return db.durabilityProfile
 }
 
 // Size returns the database file size in bytes.
@@ -167,8 +207,8 @@ func (db *Database) applyMigrationContent(name, content string) error {
 		slog.Debug("executing statement", "index", i+1, "preview", truncate(stmt, 50))
 		_, err := db.conn.Exec(stmt)
 		if err != nil {
-			// Check if it's a "table/index already exists" error
-			if strings.Contains(err.Error(), "already exists") {
+			// Check if it's an idempotent schema replay error.
+			if strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "duplicate column name") {
 				slog.Debug("object already exists, skipping", "index", i+1)
 				continue
 			}
@@ -251,20 +291,22 @@ func splitSQLStatements(content string) []string {
 
 // Stats returns database statistics.
 type Stats struct {
-	Path            string
-	Size            int64
-	Tables          int
-	TotalRows       int64
-	IndexCount      int
-	WALMode         bool
-	CacheSize       int
-	SynchronousMode string
+	Path              string
+	Size              int64
+	Tables            int
+	TotalRows         int64
+	IndexCount        int
+	WALMode           bool
+	CacheSize         int
+	SynchronousMode   string
+	DurabilityProfile string
 }
 
 // GetStats returns database statistics.
 func (db *Database) GetStats() (*Stats, error) {
 	stats := &Stats{
-		Path: db.path,
+		Path:              db.path,
+		DurabilityProfile: db.durabilityProfile,
 	}
 
 	// Get file size
@@ -302,11 +344,48 @@ func (db *Database) GetStats() (*Stats, error) {
 		return nil, fmt.Errorf("failed to get cache size: %w", err)
 	}
 
-	if err := db.conn.QueryRow("PRAGMA synchronous").Scan(&stats.SynchronousMode); err != nil {
+	var syncRaw any
+	if err := db.conn.QueryRow("PRAGMA synchronous").Scan(&syncRaw); err != nil {
 		return nil, fmt.Errorf("failed to get synchronous mode: %w", err)
 	}
+	stats.SynchronousMode = normalizeSynchronousMode(syncRaw)
 
 	return stats, nil
+}
+
+func normalizeSynchronousMode(v any) string {
+	switch x := v.(type) {
+	case int64:
+		return synchronousModeName(x)
+	case int:
+		return synchronousModeName(int64(x))
+	case string:
+		if x == "0" || x == "1" || x == "2" || x == "3" {
+			var n int64
+			_, _ = fmt.Sscan(x, &n)
+			return synchronousModeName(n)
+		}
+		return strings.ToUpper(x)
+	case []byte:
+		return normalizeSynchronousMode(string(x))
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+func synchronousModeName(n int64) string {
+	switch n {
+	case 0:
+		return "OFF"
+	case 1:
+		return "NORMAL"
+	case 2:
+		return "FULL"
+	case 3:
+		return "EXTRA"
+	default:
+		return fmt.Sprint(n)
+	}
 }
 
 // Vacuum runs VACUUM to reclaim space and defragment the database.

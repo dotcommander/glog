@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dotcommander/glog/internal/constants"
+	"github.com/dotcommander/glog/internal/domain/entities"
 	"github.com/dotcommander/glog/internal/domain/ports"
 )
 
@@ -50,55 +51,18 @@ func ExportLogsHandler(h *Handlers, formatStr string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Parse query parameters (same as ListLogs)
 		filters := parseLogFilters(r)
-
-		// Get logs from database
-		logs, total, err := h.logRepo.FindAll(filters)
-		if err != nil {
-			http.Error(w, "Failed to fetch logs: "+err.Error(), http.StatusInternalServerError)
-			return
+		filters.Limit = 0
+		filters.Offset = 0
+		if stride := r.URL.Query().Get("stride"); stride != "" {
+			if n, err := strconv.Atoi(stride); err == nil && n > 0 {
+				filters.Stride = n
+			}
 		}
 
-		// Build export response - Host is always eager-loaded by FindAll via JOIN
-		var exportLogs []LogExportResponse
-		for _, log := range logs {
-			exportLog := LogExportResponse{
-				ID:        log.ID,
-				HostID:    log.HostID,
-				Level:     string(log.Level),
-				Message:   log.Message,
-				Fields:    log.Fields,
-				Timestamp: log.Timestamp.Format(time.RFC3339),
-				CreatedAt: log.CreatedAt.Format(time.RFC3339),
-				HostName:  log.Host.Name,
-				HostTags:  log.Host.Tags,
-			}
-
-			// Add HTTP context if present
-			if log.Method != nil && *log.Method != "" {
-				exportLog.HTTPMethod = *log.Method
-			}
-			if log.Path != nil && *log.Path != "" {
-				exportLog.HTTPURL = *log.Path
-			}
-			if log.StatusCode > 0 {
-				exportLog.HTTPStatus = log.StatusCode
-			}
-			if log.Duration > 0 {
-				exportLog.HTTPDuration = log.Duration
-			}
-
-			// Add derived metadata if present
-			if log.DerivedLevel != nil {
-				exportLog.DerivedLevel = *log.DerivedLevel
-			}
-			if log.DerivedSource != nil {
-				exportLog.DerivedSource = *log.DerivedSource
-			}
-			if log.DerivedCategory != nil {
-				exportLog.DerivedCategory = *log.DerivedCategory
-			}
-
-			exportLogs = append(exportLogs, exportLog)
+		total, err := h.logRepo.Count(filters)
+		if err != nil {
+			http.Error(w, "Failed to count logs: "+err.Error(), http.StatusInternalServerError)
+			return
 		}
 
 		// Set response headers
@@ -108,9 +72,22 @@ func ExportLogsHandler(h *Handlers, formatStr string) http.HandlerFunc {
 		w.Header().Set("X-Export-Timestamp", time.Now().Format(time.RFC3339))
 
 		// Write export
-		if err := writeExport(w, exportLogs, format); err != nil {
+		start := time.Now()
+		var exported int
+		if err := writeStreamingExport(r, w, h, filters, format, &exported); err != nil {
 			// If we already wrote to response, just log error
 			slog.Error("failed to write export", "format", format, "error", err)
+			if h.recorder != nil {
+				h.recorder.RecordError("export.failed", err)
+			}
+			return
+		}
+		if h.recorder != nil {
+			h.recorder.Record("export.completed", map[string]any{
+				"format":      string(format),
+				"count":       exported,
+				"duration_ms": time.Since(start).Milliseconds(),
+			})
 		}
 	}
 }
@@ -200,6 +177,128 @@ func writeExport(w http.ResponseWriter, logs []LogExportResponse, format ExportF
 	default:
 		return fmt.Errorf("unsupported export format: %s", format)
 	}
+}
+
+func writeStreamingExport(r *http.Request, w http.ResponseWriter, h *Handlers, filters ports.LogFilters, format ExportFormat, exported *int) error {
+	switch format {
+	case JSONFormat:
+		return writeStreamingJSONExport(r, w, h, filters, exported)
+	case CSVFormat:
+		return writeStreamingCSVExport(r, w, h, filters, exported)
+	case NDJSONFormat:
+		return writeStreamingNDJSONExport(r, w, h, filters, exported)
+	default:
+		return fmt.Errorf("unsupported export format: %s", format)
+	}
+}
+
+func logToExportResponse(log *entities.Log) LogExportResponse {
+	exportLog := LogExportResponse{
+		ID:        log.ID,
+		HostID:    log.HostID,
+		Level:     string(log.Level),
+		Message:   log.Message,
+		Fields:    log.Fields,
+		Timestamp: log.Timestamp.Format(time.RFC3339),
+		CreatedAt: log.CreatedAt.Format(time.RFC3339),
+	}
+	if log.Host != nil {
+		exportLog.HostName = log.Host.Name
+		exportLog.HostTags = log.Host.Tags
+	}
+	if log.Method != nil && *log.Method != "" {
+		exportLog.HTTPMethod = *log.Method
+	}
+	if log.Path != nil && *log.Path != "" {
+		exportLog.HTTPURL = *log.Path
+	}
+	if log.StatusCode > 0 {
+		exportLog.HTTPStatus = log.StatusCode
+	}
+	if log.Duration > 0 {
+		exportLog.HTTPDuration = log.Duration
+	}
+	if log.DerivedLevel != nil {
+		exportLog.DerivedLevel = *log.DerivedLevel
+	}
+	if log.DerivedSource != nil {
+		exportLog.DerivedSource = *log.DerivedSource
+	}
+	if log.DerivedCategory != nil {
+		exportLog.DerivedCategory = *log.DerivedCategory
+	}
+	return exportLog
+}
+
+func writeStreamingJSONExport(r *http.Request, w http.ResponseWriter, h *Handlers, filters ports.LogFilters, exported *int) error {
+	_, _ = w.Write([]byte("["))
+	first := true
+	encoder := json.NewEncoder(w)
+	err := h.logRepo.StreamAll(r.Context(), filters, func(logEntry *entities.Log) error {
+		if !first {
+			if _, err := w.Write([]byte(",")); err != nil {
+				return err
+			}
+		}
+		first = false
+		(*exported)++
+		return encoder.Encode(logToExportResponse(logEntry))
+	})
+	if err != nil {
+		return err
+	}
+	_, err = w.Write([]byte("]"))
+	return err
+}
+
+func writeStreamingCSVExport(r *http.Request, w http.ResponseWriter, h *Handlers, filters ports.LogFilters, exported *int) error {
+	writer := csv.NewWriter(w)
+	header := []string{
+		"id", "host_id", "level", "message", "timestamp", "created_at",
+		"http_method", "http_url", "http_status", "http_duration_ms",
+		"derived_level", "derived_source", "derived_category", "host_name", "host_tags",
+	}
+	if err := writer.Write(header); err != nil {
+		return err
+	}
+	err := h.logRepo.StreamAll(r.Context(), filters, func(logEntry *entities.Log) error {
+		log := logToExportResponse(logEntry)
+		row := []string{
+			strconv.FormatInt(log.ID, 10),
+			strconv.FormatInt(log.HostID, 10),
+			log.Level,
+			log.Message,
+			log.Timestamp,
+			log.CreatedAt,
+			log.HTTPMethod,
+			log.HTTPURL,
+			strconv.Itoa(log.HTTPStatus),
+			strconv.FormatInt(log.HTTPDuration, 10),
+			log.DerivedLevel,
+			log.DerivedSource,
+			log.DerivedCategory,
+			log.HostName,
+			strings.Join(log.HostTags, ";"),
+		}
+		if err := writer.Write(row); err != nil {
+			return err
+		}
+		(*exported)++
+		return nil
+	})
+	writer.Flush()
+	if flushErr := writer.Error(); flushErr != nil {
+		return flushErr
+	}
+	return err
+}
+
+func writeStreamingNDJSONExport(r *http.Request, w http.ResponseWriter, h *Handlers, filters ports.LogFilters, exported *int) error {
+	encoder := json.NewEncoder(w)
+	return h.logRepo.StreamAll(r.Context(), filters, func(logEntry *entities.Log) error {
+		(*exported)++
+		return encoder.Encode(logToExportResponse(logEntry))
+	})
 }
 
 // writeJSONExport writes logs as a JSON array.

@@ -45,7 +45,7 @@ type RegisterHostRequest struct {
 	Metadata    any      `json:"metadata,omitempty"`
 }
 
-// hostToResponse converts a Host entity to a HostResponse.
+// hostToResponse converts a Host entity to a HostResponse without secrets.
 func hostToResponse(host *entities.Host) HostResponse {
 	resp := HostResponse{
 		ID:          host.ID,
@@ -57,12 +57,11 @@ func hostToResponse(host *entities.Host) HostResponse {
 		LastLogID:   host.LastLogID,
 		LogCount:    host.LogCount,
 		ErrorCount:  host.ErrorCount,
-		ErrorRate:   host.ErrorRate,
+		ErrorRate:   host.ErrorRate * 100,
 		Description: host.Description,
 		Hostname:    host.Hostname,
 		IP:          host.IP,
 		UserAgent:   host.UserAgent,
-		APIKey:      host.APIKey, // Include API key (will be empty for GET requests)
 	}
 
 	// Only include metadata if it's not empty
@@ -70,6 +69,13 @@ func hostToResponse(host *entities.Host) HostResponse {
 		resp.Metadata = host.Metadata
 	}
 
+	return resp
+}
+
+// hostToRegistrationResponse converts a Host entity to a creation response that includes the API key once.
+func hostToRegistrationResponse(host *entities.Host) HostResponse {
+	resp := hostToResponse(host)
+	resp.APIKey = host.APIKey
 	return resp
 }
 
@@ -159,7 +165,7 @@ func RegisterHostHandler(h *Handlers) http.HandlerFunc {
 		}
 
 		// Broadcast SSE event
-		resp := hostToResponse(host)
+		resp := hostToRegistrationResponse(host)
 		h.BroadcastHostRegistered(resp)
 
 		// Return response
@@ -170,7 +176,8 @@ func RegisterHostHandler(h *Handlers) http.HandlerFunc {
 // ListHostsHandler handles GET /api/v1/hosts - List all hosts.
 func ListHostsHandler(h *Handlers) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		hosts, err := h.hostRepo.List()
+		includeInternal := r.URL.Query().Get("include_internal") == "true"
+		hosts, err := h.hostRepo.List(includeInternal)
 		if err != nil {
 			http.Error(w, "Failed to fetch hosts: "+err.Error(), http.StatusInternalServerError)
 			return

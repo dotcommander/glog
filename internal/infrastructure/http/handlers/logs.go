@@ -139,6 +139,12 @@ func CreateLogHandler(h *Handlers) http.HandlerFunc {
 
 		// Broadcast SSE event
 		h.BroadcastLogCreated(logToResponse(log))
+		if h.recorder != nil {
+			h.recorder.Record("log.created", map[string]any{
+				"host_id": log.HostID,
+				"level":   string(log.Level),
+			})
+		}
 
 		// Return response
 		resp := CreateLogResponse{
@@ -210,6 +216,13 @@ func CreateBulkLogsHandler(h *Handlers) http.HandlerFunc {
 		}
 
 		// Note: UpdateLastSeen is handled by auth middleware, no need to call again
+		if h.recorder != nil {
+			h.recorder.Record("log.bulk_created", map[string]any{
+				"host_id":    host.ID,
+				"batch_size": len(logs),
+				"errors":     errorCount,
+			})
+		}
 
 		// Return response
 		resp := BulkCreateLogsResponse{

@@ -11,7 +11,7 @@
       <div class="flex items-center justify-between h-16">
         <div class="flex items-center">
           <h1 class="text-2xl font-bold text-gray-900">GLog</h1>
-          <span class="ml-3 text-sm text-gray-500">Minimalist Log Aggregation</span>
+          <span class="ml-3 text-sm text-gray-500">Local Debugging Workspace</span>
         </div>
         <div class="flex items-center space-x-4">
           <span class="text-sm text-gray-500">Live Updates</span>

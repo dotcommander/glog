@@ -10,6 +10,7 @@ const (
 	DefaultHost   = "0.0.0.0"
 	APIKeyPrefix  = "glog_v1_"
 	APIKeyPrefixV = "glog_" // Legacy prefix support
+	InternalHost  = "_glog"
 )
 
 // HTTP timeouts
@@ -34,6 +35,23 @@ const (
 	MaxRetries        = 3
 	RetryBaseDelay    = 10 * time.Millisecond
 )
+
+// Durability profiles tune SQLite synchronous mode while keeping WAL enabled.
+const (
+	DurabilityStrict   = "strict"
+	DurabilityBalanced = "balanced"
+	DurabilityFast     = "fast"
+)
+
+// IsValidDurabilityProfile checks if a durability profile is supported.
+func IsValidDurabilityProfile(profile string) bool {
+	switch profile {
+	case DurabilityStrict, DurabilityBalanced, DurabilityFast:
+		return true
+	default:
+		return false
+	}
+}
 
 // Validation limits
 const (

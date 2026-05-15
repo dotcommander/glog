@@ -38,11 +38,11 @@ class LogsStore {
     }
 
     if (filters.start_date) {
-      params.set('start_date', filters.start_date);
+      params.set('from', filters.start_date);
     }
 
     if (filters.end_date) {
-      params.set('end_date', filters.end_date);
+      params.set('to', filters.end_date);
     }
 
     if (filters.limit) {

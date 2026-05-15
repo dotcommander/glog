@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -60,6 +61,75 @@ func logInsertArgs(log *entities.Log) []any {
 // LogFilters is an alias for ports.LogFilters for backward compatibility.
 type LogFilters = ports.LogFilters
 
+type sqlExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+func updateSummaryBuckets(exec sqlExecer, logs []*entities.Log) error {
+	for _, log := range logs {
+		bucketStart := log.Timestamp.UTC().Truncate(time.Hour)
+		bucketStartText := bucketStart.Format(time.RFC3339)
+		logTimestampText := log.Timestamp.UTC().Format(time.RFC3339)
+		if _, err := exec.Exec(`
+			INSERT INTO log_buckets (bucket_start, bucket_width, host_id, level, count)
+			VALUES (?, '1h', ?, ?, 1)
+			ON CONFLICT(bucket_start, bucket_width, host_id, level)
+			DO UPDATE SET count = count + 1
+		`, bucketStartText, log.HostID, string(log.Level)); err != nil {
+			return fmt.Errorf("failed to update log bucket: %w", err)
+		}
+
+		if log.Fingerprint == "" {
+			continue
+		}
+		if _, err := exec.Exec(`
+			INSERT INTO fingerprint_buckets (
+				bucket_start, bucket_width, fingerprint, level, count, first_seen, last_seen
+			) VALUES (?, '1h', ?, ?, 1, ?, ?)
+			ON CONFLICT(bucket_start, bucket_width, fingerprint, level)
+			DO UPDATE SET
+				count = count + 1,
+				first_seen = CASE WHEN excluded.first_seen < first_seen THEN excluded.first_seen ELSE first_seen END,
+				last_seen = CASE WHEN excluded.last_seen > last_seen THEN excluded.last_seen ELSE last_seen END
+		`, bucketStartText, log.Fingerprint, string(log.Level), logTimestampText, logTimestampText); err != nil {
+			return fmt.Errorf("failed to update fingerprint bucket: %w", err)
+		}
+	}
+	return nil
+}
+
+func parseSQLiteTime(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, fmt.Errorf("empty timestamp")
+	}
+	if idx := strings.Index(value, " m=+"); idx >= 0 {
+		value = value[:idx]
+	}
+	if idx := strings.Index(value, " m=-"); idx >= 0 {
+		value = value[:idx]
+	}
+
+	layouts := []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05.999999999 -0700 MST",
+		"2006-01-02 15:04:05.999999 -0700 MST",
+		"2006-01-02 15:04:05 -0700 MST",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05.999999",
+		"2006-01-02 15:04:05",
+	}
+	for _, layout := range layouts {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed, nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("unsupported timestamp format %q", value)
+}
+
 // Create inserts a new log entry.
 func (r *LogRepository) Create(log *entities.Log) error {
 	if log.HostID == 0 {
@@ -69,7 +139,13 @@ func (r *LogRepository) Create(log *entities.Log) error {
 		return fmt.Errorf("message is required")
 	}
 
-	result, err := r.db.Conn().Exec(logInsertSQL, logInsertArgs(log)...)
+	tx, err := r.db.Conn().Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(logInsertSQL, logInsertArgs(log)...)
 	if err != nil {
 		return fmt.Errorf("failed to insert log: %w", err)
 	}
@@ -80,6 +156,12 @@ func (r *LogRepository) Create(log *entities.Log) error {
 	}
 
 	log.ID = id
+	if err := updateSummaryBuckets(tx, []*entities.Log{log}); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
 	return nil
 }
 
@@ -123,6 +205,10 @@ func (r *LogRepository) BulkCreate(logs []*entities.Log) ([]int64, error) {
 
 		ids[i] = id
 		log.ID = id
+	}
+
+	if err := updateSummaryBuckets(tx, logs); err != nil {
+		return nil, err
 	}
 
 	// Commit transaction
@@ -200,15 +286,9 @@ func (r *LogRepository) FindAll(filters LogFilters) ([]*entities.Log, int, error
 	whereStr, args := buildWhereClause(filters)
 
 	// Get total count (no JOIN needed — all WHERE filters reference logs columns only)
-	countQuery := fmt.Sprintf(`
-		SELECT COUNT(*)
-		FROM logs l
-		%s
-	`, whereStr)
-
-	var total int
-	if err := r.db.Conn().QueryRow(countQuery, args...).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("failed to count logs: %w", err)
+	total, err := r.Count(filters)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	// Main query with pagination
@@ -259,6 +339,80 @@ func (r *LogRepository) FindAll(filters LogFilters) ([]*entities.Log, int, error
 	}
 
 	return logs, total, nil
+}
+
+// Count returns the number of logs matching filters.
+func (r *LogRepository) Count(filters LogFilters) (int, error) {
+	whereStr, args := buildWhereClause(filters)
+	countQuery := fmt.Sprintf(`
+		SELECT COUNT(*)
+		FROM logs l
+		%s
+	`, whereStr)
+
+	var total int
+	if err := r.db.Conn().QueryRow(countQuery, args...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("failed to count logs: %w", err)
+	}
+	return total, nil
+}
+
+// StreamAll streams logs with filters and eager-loaded host data.
+func (r *LogRepository) StreamAll(ctx context.Context, filters LogFilters, fn func(*entities.Log) error) error {
+	whereStr, args := buildWhereClause(filters)
+	orderBy := filters.OrderBy
+	if orderBy == "" || !allowedOrderBy[orderBy] {
+		orderBy = "timestamp"
+	}
+
+	queryArgs := make([]interface{}, 0, len(args)+2)
+	queryArgs = append(queryArgs, args...)
+	limitClause := ""
+	if filters.Limit > 0 {
+		limit, offset := constants.NormalizePagination(filters.Limit, filters.Offset)
+		limitClause = "LIMIT ? OFFSET ?"
+		queryArgs = append(queryArgs, limit, offset)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT l.id, l.host_id, l.level, l.message, l.fields, l.timestamp, l.created_at,
+		       l.http_method, l.http_url, l.http_status, l.http_response_time_ms,
+		       l.derived_level, l.derived_source, l.derived_category, l.fingerprint,
+		       h.id, h.name, h.tags, h.status, h.last_seen
+		FROM logs l
+		JOIN hosts h ON l.host_id = h.id
+		%s
+		ORDER BY l.%s DESC
+		%s
+	`, whereStr, orderBy, limitClause)
+
+	rows, err := r.db.Conn().QueryContext(ctx, query, queryArgs...)
+	if err != nil {
+		return fmt.Errorf("failed to query logs: %w", err)
+	}
+	defer rows.Close()
+
+	stride := filters.Stride
+	if stride < 1 {
+		stride = 1
+	}
+	seen := 0
+	for rows.Next() {
+		var log entities.Log
+		if err := r.scanLogWithHost(rows, &log); err != nil {
+			return fmt.Errorf("failed to scan log: %w", err)
+		}
+		if seen%stride == 0 {
+			if err := fn(&log); err != nil {
+				return err
+			}
+		}
+		seen++
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating logs: %w", err)
+	}
+	return nil
 }
 
 // Delete removes a log by ID.
@@ -514,11 +668,20 @@ func (r *LogRepository) FindGrouped(filters LogFilters) ([]ports.GroupedLog, int
 	var groups []ports.GroupedLog
 	for rows.Next() {
 		var g ports.GroupedLog
+		var firstSeen, lastSeen string
 		if err := rows.Scan(
 			&g.Fingerprint, &g.Count, &g.Level, &g.Message,
-			&g.FirstSeen, &g.LastSeen, &g.HostID, &g.HostName,
+			&firstSeen, &lastSeen, &g.HostID, &g.HostName,
 		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan grouped log: %w", err)
+		}
+		g.FirstSeen, err = parseSQLiteTime(firstSeen)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to parse grouped first_seen: %w", err)
+		}
+		g.LastSeen, err = parseSQLiteTime(lastSeen)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to parse grouped last_seen: %w", err)
 		}
 		groups = append(groups, g)
 	}
@@ -528,4 +691,104 @@ func (r *LogRepository) FindGrouped(filters LogFilters) ([]ports.GroupedLog, int
 	}
 
 	return groups, total, nil
+}
+
+// FindLogBuckets returns hourly log count summaries.
+func (r *LogRepository) FindLogBuckets(filters LogFilters) ([]ports.LogBucket, error) {
+	var where []string
+	var args []any
+	where = append(where, "bucket_width = '1h'")
+	fromClause := "log_buckets lb"
+	if filters.HostID != nil {
+		where = append(where, "host_id = ?")
+		args = append(args, *filters.HostID)
+	} else if !filters.IncludeInternal {
+		fromClause = "log_buckets lb JOIN hosts h ON h.id = lb.host_id"
+		where = append(where, "h.name != ?")
+		args = append(args, constants.InternalHost)
+	}
+	if filters.Level != "" {
+		where = append(where, "level = ?")
+		args = append(args, filters.Level)
+	}
+	if filters.FromDate != "" {
+		where = append(where, "bucket_start >= ?")
+		args = append(args, filters.FromDate)
+	}
+	if filters.ToDate != "" {
+		where = append(where, "bucket_start <= ?")
+		args = append(args, filters.ToDate)
+	}
+
+	query := `
+		SELECT bucket_start, bucket_width, host_id, level, count
+		FROM ` + fromClause + `
+		WHERE ` + strings.Join(where, " AND ") + `
+		ORDER BY bucket_start ASC, host_id ASC, level ASC
+	`
+	rows, err := r.db.Conn().Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query log buckets: %w", err)
+	}
+	defer rows.Close()
+
+	var buckets []ports.LogBucket
+	for rows.Next() {
+		var bucket ports.LogBucket
+		if err := rows.Scan(&bucket.BucketStart, &bucket.BucketWidth, &bucket.HostID, &bucket.Level, &bucket.Count); err != nil {
+			return nil, fmt.Errorf("failed to scan log bucket: %w", err)
+		}
+		buckets = append(buckets, bucket)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating log buckets: %w", err)
+	}
+	return buckets, nil
+}
+
+// FindFingerprintBuckets returns hourly fingerprint summaries.
+func (r *LogRepository) FindFingerprintBuckets(filters LogFilters) ([]ports.FingerprintBucket, error) {
+	var where []string
+	var args []any
+	where = append(where, "bucket_width = '1h'")
+	if filters.Level != "" {
+		where = append(where, "level = ?")
+		args = append(args, filters.Level)
+	}
+	if filters.FromDate != "" {
+		where = append(where, "bucket_start >= ?")
+		args = append(args, filters.FromDate)
+	}
+	if filters.ToDate != "" {
+		where = append(where, "bucket_start <= ?")
+		args = append(args, filters.ToDate)
+	}
+
+	query := `
+		SELECT bucket_start, bucket_width, fingerprint, level, count, first_seen, last_seen
+		FROM fingerprint_buckets
+		WHERE ` + strings.Join(where, " AND ") + `
+		ORDER BY bucket_start ASC, fingerprint ASC, level ASC
+	`
+	rows, err := r.db.Conn().Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query fingerprint buckets: %w", err)
+	}
+	defer rows.Close()
+
+	var buckets []ports.FingerprintBucket
+	for rows.Next() {
+		var bucket ports.FingerprintBucket
+		if err := rows.Scan(
+			&bucket.BucketStart, &bucket.BucketWidth, &bucket.Fingerprint,
+			&bucket.Level, &bucket.Count, &bucket.FirstSeen, &bucket.LastSeen,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan fingerprint bucket: %w", err)
+		}
+		buckets = append(buckets, bucket)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating fingerprint buckets: %w", err)
+	}
+	return buckets, nil
 }

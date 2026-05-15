@@ -1,14 +1,19 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 
 	"github.com/dotcommander/glog/internal/constants"
 	httpinfra "github.com/dotcommander/glog/internal/infrastructure/http"
 	"github.com/dotcommander/glog/internal/infrastructure/http/handlers"
+	"github.com/dotcommander/glog/internal/infrastructure/metrics"
 	"github.com/dotcommander/glog/internal/infrastructure/persistence/sqlite"
 	"github.com/dotcommander/glog/internal/infrastructure/sse"
 	"github.com/spf13/cobra"
@@ -23,6 +28,10 @@ func ServeCmd() *cobra.Command {
 			dbPath, _ := cmd.Flags().GetString("db")
 			addr, _ := cmd.Flags().GetString("addr")
 			webDir, _ := cmd.Flags().GetString("web")
+			durability, _ := cmd.Flags().GetString("durability")
+			if !constants.IsValidDurabilityProfile(durability) {
+				return fmt.Errorf("invalid durability profile %q: must be strict, balanced, or fast", durability)
+			}
 
 			// Parse address to extract host and port
 			host := constants.DefaultHost
@@ -43,7 +52,7 @@ func ServeCmd() *cobra.Command {
 			}
 
 			// Initialize database
-			db, err := sqlite.New(dbPath)
+			db, err := sqlite.NewWithOptions(dbPath, sqlite.Options{DurabilityProfile: durability})
 			if err != nil {
 				return fmt.Errorf("failed to initialize database: %w", err)
 			}
@@ -57,20 +66,30 @@ func ServeCmd() *cobra.Command {
 			// Create repositories
 			hostRepo := sqlite.NewHostRepository(db)
 			logRepo := sqlite.NewLogRepository(db)
+			inboxRepo := sqlite.NewInboxRepository(db)
 
 			// Create SSE hub
 			hub := sse.NewHub()
 
 			// Create handlers with dependency injection
 			h := handlers.NewHandlers(hostRepo, logRepo, hub)
+			h.SetInboxRepo(inboxRepo)
+			recorder, err := metrics.NewRecorder(hostRepo, logRepo)
+			if err != nil {
+				slog.Warn("failed to initialize internal metrics", "error", err)
+			} else {
+				h.SetRecorder(recorder)
+				recorder.Record("server.starting", map[string]any{"addr": addr, "db": dbPath, "durability": durability})
+			}
 
 			// Create router dependencies
 			deps := &httpinfra.RouterDeps{
-				DB:       db,
-				HostRepo: hostRepo,
-				LogRepo:  logRepo,
-				Hub:      hub,
-				Handlers: h,
+				DB:        db,
+				HostRepo:  hostRepo,
+				LogRepo:   logRepo,
+				InboxRepo: inboxRepo,
+				Hub:       hub,
+				Handlers:  h,
 			}
 
 			// Create and start server
@@ -89,13 +108,37 @@ func ServeCmd() *cobra.Command {
 				slog.Info("Frontend", "path", webDir)
 			}
 
-			return server.Start()
+			errCh := make(chan error, 1)
+			go func() {
+				errCh <- server.Start()
+			}()
+
+			sigCh := make(chan os.Signal, 1)
+			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+			defer signal.Stop(sigCh)
+
+			select {
+			case err := <-errCh:
+				return err
+			case sig := <-sigCh:
+				slog.Info("received shutdown signal", "signal", sig.String())
+				if recorder != nil {
+					recorder.Record("server.shutdown", map[string]any{"signal": sig.String()})
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), constants.ShutdownTimeout)
+				defer cancel()
+				if err := server.Shutdown(ctx); err != nil {
+					return err
+				}
+				return <-errCh
+			}
 		},
 	}
 
 	cmd.Flags().String("addr", ":6016", "Server address to listen on")
 	cmd.Flags().String("db", "glog.db", "Database file path")
 	cmd.Flags().String("web", "", "Path to SvelteKit build output (e.g., web/build)")
+	cmd.Flags().String("durability", constants.DurabilityBalanced, "SQLite durability profile (strict, balanced, fast)")
 
 	return cmd
 }

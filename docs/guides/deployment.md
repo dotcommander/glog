@@ -1,11 +1,12 @@
 # Deployment
 
-Deploy as a bare binary, Docker container, or systemd service. SQLite is the only database dependency — no separate database server required.
+Deploy as a bare binary, macOS launchd service, Docker container, or systemd service. SQLite is the only database dependency — no separate database server required.
 
 ## Contents
 
 - [Prerequisites](#prerequisites)
 - [Single-Host Deployment (SQLite)](#single-host-deployment-sqlite)
+- [macOS launchd service](#macos-launchd-service)
 - [Docker Deployment](#docker-deployment)
 - [Docker Compose Deployment](#docker-compose-deployment)
 - [Systemd Service](#systemd-service)
@@ -46,6 +47,62 @@ go build -o bin/glog ./cmd/glog
 
 # With web frontend
 ./bin/glog serve --db ./glog.db --web ./web/build --addr :6016
+```
+
+## macOS launchd service
+
+For a developer workstation or small local deployment on macOS, use the
+repo `Justfile` to install a user-level LaunchAgent.
+
+```bash
+just service-install
+```
+
+The recipe builds `web/build`, installs the current CLI to `~/go/bin/glog`,
+writes `~/Library/LaunchAgents/dev.glog.plist`, and starts the service with:
+
+```bash
+glog serve \
+  --addr 127.0.0.1:6016 \
+  --db ./glog.db \
+  --web ./web/build
+```
+
+Check it:
+
+```bash
+just service-status
+just health
+open http://127.0.0.1:6016
+```
+
+Operate it:
+
+```bash
+just service-restart
+just service-logs
+just service-uninstall
+```
+
+Use a different local port:
+
+```bash
+GLOG_ADDR=127.0.0.1:6020 just service-install
+```
+
+Manual launchd commands, if you need them:
+
+```bash
+launchctl print gui/$(id -u)/dev.glog
+launchctl kickstart -k gui/$(id -u)/dev.glog
+launchctl bootout gui/$(id -u)/dev.glog
+```
+
+Logs are written beside the checkout:
+
+```text
+glog.launchd.log
+glog.launchd.err.log
 ```
 
 ### Environment variables
@@ -548,4 +605,3 @@ lsof /var/lib/glog/glog.db
 - [Architecture](../architecture/README.md)
 
 ---
-

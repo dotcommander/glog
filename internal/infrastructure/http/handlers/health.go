@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/dotcommander/glog/internal/infrastructure/persistence/sqlite"
 	"github.com/dotcommander/glog/internal/infrastructure/sse"
 )
 
@@ -12,6 +13,10 @@ type DBProbe interface {
 	Ping() error
 	Path() string
 	Size() int64
+}
+
+type DBStatsProbe interface {
+	GetStats() (*sqlite.Stats, error)
 }
 
 // HealthHandler handles health check requests.
@@ -36,6 +41,17 @@ func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sseClients := h.hub.ClientCount()
+	var durability map[string]interface{}
+	if statsProbe, ok := h.db.(DBStatsProbe); ok {
+		if stats, err := statsProbe.GetStats(); err == nil {
+			durability = map[string]interface{}{
+				"profile":      stats.DurabilityProfile,
+				"synchronous":  stats.SynchronousMode,
+				"wal_enabled":  stats.WALMode,
+				"sqlite_cache": stats.CacheSize,
+			}
+		}
+	}
 
 	response := map[string]interface{}{
 		"status": "healthy",
@@ -48,6 +64,9 @@ func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"clients": sseClients,
 		},
 		"timestamp": time.Now().Format(time.RFC3339),
+	}
+	if durability != nil {
+		response["durability"] = durability
 	}
 
 	status := http.StatusOK

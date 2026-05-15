@@ -97,9 +97,9 @@
   });
 </script>
 
-<div class="bg-white border-r border-gray-200 w-80 flex flex-col">
+<div class="flex h-full w-full flex-col border-r border-gray-200 bg-white lg:w-80">
   <!-- Header -->
-  <div class="p-4 border-b border-gray-200">
+  <div class="border-b border-gray-200 p-4">
     <div class="flex items-center justify-between">
       <h2 class="text-lg font-medium text-gray-900">
         Hosts
@@ -110,7 +110,8 @@
         {/if}
       </h2>
       <button
-        class="px-2 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+        class="h-8 w-8 rounded-md bg-blue-600 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+        aria-label="Add host"
         onclick={() => showAddHost = !showAddHost}>
         +
       </button>
@@ -118,27 +119,27 @@
 
     <!-- Add host form -->
     {#if showAddHost}
-      <div class="mt-3 p-3 bg-gray-50 rounded">
+      <div class="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3">
         <input
           type="text"
           bind:value={newHostName}
           placeholder="Host name"
-          class="w-full px-2 py-1 text-sm border border-gray-300 rounded mb-2"
+          class="mb-2 w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
         />
         <input
           type="text"
           bind:value={newHostTags}
           placeholder="Tags (comma-separated)"
-          class="w-full px-2 py-1 text-sm border border-gray-300 rounded mb-2"
+          class="mb-2 w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
         />
         <div class="flex space-x-2">
           <button
-            class="flex-1 px-2 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+            class="flex-1 rounded-md bg-blue-600 px-2 py-1 text-sm text-white hover:bg-blue-700"
             onclick={addHost}>
             Add
           </button>
           <button
-            class="px-2 py-1 text-sm bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+            class="rounded-md bg-gray-200 px-2 py-1 text-sm text-gray-700 hover:bg-gray-300"
             onclick={() => showAddHost = false}>
             Cancel
           </button>
@@ -150,7 +151,7 @@
     {#if filtersStore.filters.host_id}
       {@const filteredHost = hosts.find(h => h.id === filtersStore.filters.host_id)}
       {#if filteredHost}
-        <div class="mt-2 p-2 bg-blue-50 rounded">
+        <div class="mt-2 rounded-md bg-blue-50 p-2">
           <div class="flex items-center justify-between">
             <span class="text-sm text-blue-800">
               Filtered by: {filteredHost.name}
@@ -186,7 +187,7 @@
       <div
         role="button"
         tabindex="0"
-        class="p-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors {filtersStore.filters.host_id === host.id ? 'bg-blue-50' : ''}"
+        class="border-b border-gray-100 p-3 transition-colors hover:bg-gray-50 {filtersStore.filters.host_id === host.id ? 'bg-blue-50 shadow-[inset_3px_0_0_#2563eb]' : ''}"
         onclick={() => filterByHost(host.id)}
         onkeydown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -197,12 +198,12 @@
         aria-label="Filter logs by host {host.name}">
 
         <!-- Host name and status -->
-        <div class="flex items-center justify-between mb-2">
-          <div class="flex items-center space-x-2">
+        <div class="mb-2 flex items-center justify-between gap-3">
+          <div class="flex min-w-0 items-center gap-2">
             <div class="w-2 h-2 rounded-full {getStatusColor(host.status)}"></div>
-            <h3 class="font-medium text-gray-900">{host.name}</h3>
+            <h3 class="truncate font-medium text-gray-900">{host.name}</h3>
           </div>
-          <span class="text-xs text-gray-500">
+          <span class="shrink-0 text-xs text-gray-500">
             {formatRelativeTime(host.last_seen)}
           </span>
         </div>
@@ -246,7 +247,7 @@
     {/each}
 
     {#if hostsStore.error}
-      <div class="p-4 bg-red-50 border border-red-200 rounded m-2">
+      <div class="m-2 rounded-md border border-red-200 bg-red-50 p-4">
         <p class="text-red-800 text-sm">{hostsStore.error}</p>
       </div>
     {/if}
@@ -254,7 +255,7 @@
 
   <!-- Summary stats -->
   {#if hosts.length > 0}
-    <div class="p-4 border-t border-gray-200 bg-gray-50">
+    <div class="border-t border-gray-200 bg-gray-50 p-4">
       <div class="grid grid-cols-4 gap-2 text-center text-xs">
         <div>
           <div class="font-medium text-gray-900">{hosts.length}</div>

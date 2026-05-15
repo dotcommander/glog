@@ -50,6 +50,9 @@ Desktop.ini
 *.log
 /logs/
 
+# README/docs image assets may be WebP even when a user has a global *.webp ignore.
+!docs/*.webp
+
 # Build directories
 build/
 dist/

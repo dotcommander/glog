@@ -5,6 +5,29 @@ set -eu
 REPO="dotcommander/glog"
 VERSION="${1:-latest}"
 
+usage() {
+  cat <<'USAGE'
+Usage: install.sh [VERSION]
+
+Install the GLog CLI from GitHub releases.
+
+Examples:
+  curl -fsSL https://raw.githubusercontent.com/dotcommander/glog/main/scripts/install.sh | sh
+  INSTALL_DIR="$HOME/bin" sh scripts/install.sh
+  sh scripts/install.sh v0.1.0
+
+Environment:
+  INSTALL_DIR  Directory to install glog into. Defaults to /usr/local/bin when writable, otherwise ~/.local/bin.
+USAGE
+}
+
+case "$VERSION" in
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+esac
+
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
 
@@ -59,6 +82,11 @@ if ! curl -fsSL "$URL" -o "$ARCHIVE"; then
   fi
 fi
 
+if [ ! -s "$ARCHIVE" ]; then
+  printf "Downloaded archive not found: %s\n" "$ARCHIVE" >&2
+  exit 1
+fi
+
 tar -xzf "$ARCHIVE" -C "$TMP_DIR"
 
 mkdir -p "$INSTALL_DIR"
@@ -72,4 +100,22 @@ fi
 install -m 0755 "$BIN_PATH" "$INSTALL_DIR/glog"
 
 printf "Installed glog to %s/glog\n" "$INSTALL_DIR"
-printf "Run: glog version\n"
+
+case ":$PATH:" in
+  *":$INSTALL_DIR:"*)
+    printf "PATH: %s is already on PATH\n" "$INSTALL_DIR"
+    ;;
+  *)
+    printf "PATH: %s is not on PATH yet\n" "$INSTALL_DIR"
+    printf "Add it for this shell with:\n"
+    printf "  export PATH=\"%s:\$PATH\"\n" "$INSTALL_DIR"
+    ;;
+esac
+
+printf "\nVerify your install:\n"
+printf "  glog doctor\n"
+printf "\nStart your first local server:\n"
+printf "  glog serve\n"
+printf "\nIn another terminal, register and send a test log:\n"
+printf "  glog host register --server http://localhost:6016 --name my-machine\n"
+printf "  glog log \"hello from glog\"\n"
