@@ -327,24 +327,26 @@ glog host list --server https://logs.example.com
 
 **Check CLI Config**
 ```bash
-glog --config ./glog.json info
+glog doctor --config ./glog.json
 ```
 
 ## Development
 
 ### Prerequisites
 
-- Go 1.21+
+- Go 1.25+ (see `go.mod` for the exact toolchain version)
 - SQLite 3.x (pure Go driver: `modernc.org/sqlite`)
 - Make (optional, for Makefile targets)
 
 ### Setup
 
+The module is already initialized (`github.com/dotcommander/glog`); just clone and build.
+
 ```bash
 git clone https://github.com/dotcommander/glog
 cd glog
-go mod init github.com/dotcommander/glog
-go mod tidy
+go mod download
+go build ./cmd/glog
 ```
 
 ### Running Tests
@@ -652,6 +654,5 @@ MIT License - see LICENSE file for details
 
 ---
 
-**Last Updated**: 2026-01-07
-**Version**: 1.0.0
-**Status**: Core API Complete, Svelte 5 Frontend Complete
+**Last Updated**: 2026-05-20
+**Version**: see `CHANGELOG.md` for the latest released version (currently v0.3.0)

@@ -252,7 +252,7 @@ GLog is for teams and coding agents that need operational evidence without a log
 - [Deployment](docs/guides/deployment.md) — launchd, Docker, systemd, nginx
 - [SSE events](docs/api/events.md) — real-time event format
 - [Agent inbox](docs/api/inbox.md) — notes, tasks, questions, and handoffs for coding agents
-- [Architecture](docs/architecture/README.md) — design decisions
+- [Architecture](docs/architecture/index.md) — design decisions
 - [Invariants](docs/architecture/invariants.md) — behavior future changes must preserve
 - [Contributing](docs/contributing.md) — commit format, test requirements
 
