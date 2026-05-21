@@ -9,16 +9,13 @@ The domain layer contains business logic, entities, and interfaces. It has zero 
 ```
 internal/domain/
 ├── entities/         # Business entities
-│   ├── host.go
-│   ├── log.go
-│   └── jsonmap.go
+│   ├── host.go       # Host entity, HostStatus, HostTags, JSONMap value type
+│   ├── log.go        # Log entry entity, LogLevel and LogPriority
+│   └── inbox.go      # Agent inbox item entity (InboxItem, status/kind/priority)
 ├── ports/           # Repository interfaces
-│   ├── host_repository.go
-│   └── log_repository.go
-├── services/        # Business logic services
-│   └── pattern_matcher.go
-└── valueobjects/    # Value objects
-    └── severity.go
+│   └── repositories.go  # HostRepository, LogRepository, InboxRepository
+└── services/        # Business logic services
+    └── pattern_matcher.go
 ```
 
 ## Entities
@@ -61,9 +58,29 @@ type Log struct {
 
 **Validation rules**:
 - `HostID`: Required, must reference valid host
-- `Level`: Required, one of valid levels (see valueobjects)
+- `Level`: Required, one of the valid `LogLevel` values — `trace`, `debug`, `info`, `warn`, `error`, `fatal` (defined in `entities/log.go`, with relative ordering in `LogPriority`)
 - `Message`: Required, max 10,000 characters
 - `Fields`: Optional, JSON object
+
+### InboxItem
+
+**Business entity representing an agent inbox item** (notes, tasks, questions, bugs, and handoffs surfaced for agents to act on):
+```go
+type InboxItem struct {
+    ID       int64         `json:"id"`
+    Title    string        `json:"title"`
+    Body     string        `json:"body,omitempty"`
+    Status   InboxStatus   `json:"status"`
+    Kind     InboxKind     `json:"kind"`
+    Priority InboxPriority `json:"priority"`
+    // ... source, repo, session, tags, linked logs/fingerprints, timestamps
+}
+```
+
+**Enumerations**:
+- `InboxStatus`: `open`, `in_progress`, `blocked`, `done`, `dismissed`
+- `InboxKind`: `note`, `task`, `question`, `bug`, `handoff`
+- `InboxPriority`: `low`, `normal`, `high`
 
 ### JSONMap
 
@@ -114,6 +131,19 @@ type LogRepository interface {
     Delete(id int64) error
     DeleteByHostID(hostID int64) error
     GetStats(hostID int64) (*HostStats, error)
+}
+```
+
+### InboxRepository
+
+**Interface for agent inbox data access**:
+```go
+type InboxRepository interface {
+    Create(item *InboxItem) error
+    FindByID(id int64) (*InboxItem, error)
+    List(filters InboxFilters) ([]*InboxItem, int, error)
+    Update(item *InboxItem) error
+    Delete(id int64) error
 }
 ```
 

@@ -17,7 +17,7 @@ Deploy as a bare binary, macOS launchd service, Docker container, or systemd ser
 
 ## Prerequisites
 
-- **Go 1.21+** (for building from source)
+- **Go 1.25+** (for building from source; see `go.mod` for the exact toolchain version)
 - **SQLite 3.x** (included via pure Go driver)
 - **50MB+ disk space** for database and logs
 - **Port 6016** available (default)
@@ -105,16 +105,14 @@ glog.launchd.log
 glog.launchd.err.log
 ```
 
-### Environment variables
+### Server flags
+
+The server reads its database path and listen address from command-line flags
+(there are no `GLOG_*` server environment variables). Pass them explicitly:
 
 ```bash
-# Optional: Set default database path
-export GLOG_DB_PATH=/var/lib/glog/glog.db
-
-# Optional: Set default port
-export GLOG_PORT=6016
-
-./bin/glog serve
+# Set database path and listen address
+./bin/glog serve --db /var/lib/glog/glog.db --addr :6016
 ```
 
 ### Directory layout
@@ -139,7 +137,7 @@ Create a `Dockerfile` in the project root:
 
 ```dockerfile
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
@@ -215,9 +213,9 @@ services:
       - ./data:/data
       # Optional: Custom config
       # - ./config/glog.json:/etc/glog/config.json:ro
-    environment:
-      - GLOG_DB_PATH=/data/glog.db
-      - GLOG_PORT=6016
+    # The image CMD already runs `glog serve --db /data/glog.db --addr :6016`.
+    # To change the db path or address, override `command:` here rather than
+    # setting environment variables (the server has no GLOG_* env vars).
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:6016/health"]
@@ -548,24 +546,30 @@ sudo systemctl start glog
 
 ## Scaling
 
-### When to migrate to PostgreSQL
+### A future PostgreSQL backend
 
-Consider migrating if you experience:
+> **Not currently implemented.** GLog ships with SQLite as its only backend.
+> A PostgreSQL backend is a possible future migration path, not a supported
+> deployment option today.
+
+A future PostgreSQL backend would help if you experience:
 
 - >100 hosts sending logs
 - >1000 logs/second sustained
 - Frequent "database locked" errors
 - Need for multi-region deployment
 
-See [Database design](../architecture/database-design.md#migration-to-postgresql) for migration steps.
+See [Database design](../architecture/database-design.md#migration-to-postgresql) for the forward-looking migration design.
 
 ### Horizontal scaling
 
-GLog is designed as a single-node application. For horizontal scaling:
+GLog is designed as a single-node application and currently runs against a
+single SQLite database. Horizontal scaling is **not supported today**; it would
+require the future PostgreSQL backend described above. A possible future design:
 
-1. **Use PostgreSQL as backend**: Allows multiple GLog instances
-2. **Load balancer**: Distribute read requests
-3. **Write coordination**: Single writer or partition by host_id
+1. **A shared SQL backend** (e.g. the future PostgreSQL repository): would allow multiple GLog instances
+2. **Load balancer**: distribute read requests
+3. **Write coordination**: single writer or partition by host_id
 
 ## Troubleshooting
 
@@ -602,6 +606,6 @@ lsof /var/lib/glog/glog.db
 
 - [SSE events API](../api/events.md)
 - [Go integration](../go-integration.md)
-- [Architecture](../architecture/README.md)
+- [Architecture](../architecture/index.md)
 
 ---

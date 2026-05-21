@@ -250,9 +250,15 @@ if err != nil && isTransientError(err) {
 
 ## Migration to PostgreSQL
 
+> **Status: future migration path — not currently implemented.** GLog ships
+> with SQLite as its only backend. There is no PostgreSQL repository and no
+> database-type configuration switch in the codebase today. The section below
+> is forward-looking design guidance for a possible future migration, not
+> documentation of existing runtime support.
+
 ### When to migrate
 
-**Signs you need PostgreSQL**:
+**Signs a future PostgreSQL backend would help**:
 - > 100 hosts sending logs
 - > 1000 logs/second sustained
 - Need full-text search
@@ -277,29 +283,15 @@ if err != nil && isTransientError(err) {
    }
    ```
 
-3. **Factory pattern**:
-   ```go
-   func NewRepository(dbType, conn string) (HostRepository, error) {
-       switch dbType {
-       case "sqlite":
-           return sqlite.NewHostRepository(conn)
-       case "postgresql":
-           return postgresql.NewHostRepository(conn)
-       default:
-           return nil, fmt.Errorf("unknown db type: %s", dbType)
-       }
-   }
-   ```
+3. **Factory pattern** (would need to be added — no such factory exists today):
+   a `NewRepository(dbType, conn)` constructor that selects a `sqlite` or a new
+   Postgres repository implementation behind the shared `HostRepository` and
+   `LogRepository` interfaces.
 
-4. **Configuration**:
-   ```json
-   {
-     "database": {
-       "type": "postgresql",
-       "connection": "postgres://user:pass@host/glog?sslmode=require"
-     }
-   }
-   ```
+4. **Configuration** (would need to be added — there is no database-type config
+   field today): a `database` config block selecting the backend and supplying
+   a connection string, e.g. a Postgres DSN. This config surface does not
+   currently exist and would have to be designed as part of the migration.
 
 ### Schema differences
 

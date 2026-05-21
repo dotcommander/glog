@@ -69,7 +69,7 @@ just health
 
 This installs a macOS `launchd` user agent named `dev.glog` that:
 
-- runs `/Users/vampire/go/bin/glog serve`
+- runs `~/go/bin/glog serve` (the installed glog binary)
 - serves the dashboard from `web/build`
 - stores the database at `./glog.db`
 - restarts automatically with `KeepAlive`
