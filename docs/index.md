@@ -10,6 +10,6 @@ What's in this directory:
 | [api/events.md](api/events.md) | SSE events API reference |
 | [api/inbox.md](api/inbox.md) | Agent inbox API and CLI usage |
 | [guides/deployment.md](guides/deployment.md) | launchd, Docker, systemd, reverse proxy, backups |
-| [architecture/README.md](architecture/README.md) | Architecture overview, design decisions |
+| [architecture/index.md](architecture/index.md) | Architecture overview, design decisions |
 
 The architecture docs cover SQLite concurrency, the two-layer handler/repository pattern, and data flows. Read those if you're contributing or extending the system.
