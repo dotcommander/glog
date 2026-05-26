@@ -1,8 +1,12 @@
 package http
 
 import (
+	"bytes"
+	"encoding/json"
 	stdhttp "net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,6 +71,69 @@ func TestHostsRouteReturnsErrorRatePercent(t *testing.T) {
 	got := hosts[0].(map[string]any)["error_rate"].(float64)
 	if got != 50 {
 		t.Fatalf("error_rate = %v; want 50", got)
+	}
+}
+
+func TestLogRoutesRejectUnknownJSONFields(t *testing.T) {
+	t.Parallel()
+
+	router, hostRepo, _ := newLogRouteTestDeps(t)
+	host := createHTTPTestHost(t, hostRepo, "api")
+
+	body := bytes.NewBufferString(`{"level":"info","message":"hello","unexpected":true}`)
+	req := httptest.NewRequest(stdhttp.MethodPost, "/api/v1/logs", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+host.APIKey)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != stdhttp.StatusBadRequest {
+		t.Fatalf("POST /api/v1/logs status = %d; want %d; body = %q", rec.Code, stdhttp.StatusBadRequest, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("unknown field")) {
+		t.Fatalf("body = %q; want unknown field error", rec.Body.String())
+	}
+}
+
+func TestExportRejectsInvalidLevelFilter(t *testing.T) {
+	t.Parallel()
+
+	router, hostRepo, _ := newLogRouteTestDeps(t)
+	host := createHTTPTestHost(t, hostRepo, "api")
+
+	req := httptest.NewRequest(stdhttp.MethodGet, "/api/v1/export/json?level=nope", nil)
+	req.Header.Set("Authorization", "Bearer "+host.APIKey)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != stdhttp.StatusBadRequest {
+		t.Fatalf("GET /api/v1/export/json status = %d; want %d; body = %q", rec.Code, stdhttp.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestBulkLogRejectsOversizedRequestBody(t *testing.T) {
+	t.Parallel()
+
+	router, hostRepo, _ := newLogRouteTestDeps(t)
+	host := createHTTPTestHost(t, hostRepo, "api")
+	payload, err := json.Marshal(map[string]any{
+		"logs": []map[string]any{{
+			"level":   "info",
+			"message": strings.Repeat("x", 12*1024*1024),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	req := httptest.NewRequest(stdhttp.MethodPost, "/api/v1/logs/bulk", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+host.APIKey)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != stdhttp.StatusBadRequest {
+		t.Fatalf("POST /api/v1/logs/bulk status = %d; want %d; body = %q", rec.Code, stdhttp.StatusBadRequest, rec.Body.String())
 	}
 }
 

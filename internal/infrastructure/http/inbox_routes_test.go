@@ -88,6 +88,17 @@ func TestInboxRoutesRejectInvalidPayloads(t *testing.T) {
 	}
 }
 
+func TestInboxRoutesRejectUnknownJSONFields(t *testing.T) {
+	t.Parallel()
+
+	router := newInboxTestRouter(t)
+
+	requestStatus(t, router, http.MethodPost, "/api/v1/inbox", map[string]any{
+		"title":      "Investigate drift",
+		"unexpected": true,
+	}, http.StatusBadRequest)
+}
+
 func newInboxTestRouter(t *testing.T) http.Handler {
 	t.Helper()
 

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -218,13 +217,8 @@ func parseInboxID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 }
 
 func decodeInboxItemRequest(w http.ResponseWriter, r *http.Request) (InboxItemRequest, bool) {
-	defer r.Body.Close()
 	var req InboxItemRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
-		return req, false
-	}
-	return req, true
+	return req, decodeJSONRequest(w, r, &req)
 }
 
 func inboxRequestToItem(req InboxItemRequest, existing *entities.InboxItem) (*entities.InboxItem, error) {

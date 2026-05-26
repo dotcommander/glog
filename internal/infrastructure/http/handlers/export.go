@@ -58,6 +58,10 @@ func ExportLogsHandler(h *Handlers, formatStr string) http.HandlerFunc {
 				filters.Stride = n
 			}
 		}
+		if filters.Level != "" && !constants.IsValidLogLevel(filters.Level) {
+			http.Error(w, "Invalid level. Must be one of: trace, debug, info, warn, error, fatal", http.StatusBadRequest)
+			return
+		}
 
 		total, err := h.logRepo.Count(filters)
 		if err != nil {
@@ -92,65 +96,6 @@ func ExportLogsHandler(h *Handlers, formatStr string) http.HandlerFunc {
 	}
 }
 
-// parseLogFilters extracts filters from query parameters.
-func parseLogFilters(r *http.Request) ports.LogFilters {
-	filters := ports.LogFilters{}
-
-	// Parse limit with validation
-	if limit := r.URL.Query().Get("limit"); limit != "" {
-		if l, err := strconv.Atoi(limit); err == nil && l > 0 {
-			filters.Limit = l
-		}
-	}
-	if filters.Limit <= 0 {
-		filters.Limit = constants.DefaultLimit
-	}
-	if filters.Limit > constants.MaxLimit {
-		filters.Limit = constants.MaxLimit
-	}
-
-	// Parse offset with validation
-	if offset := r.URL.Query().Get("offset"); offset != "" {
-		if o, err := strconv.Atoi(offset); err == nil && o >= 0 {
-			filters.Offset = o
-		}
-	}
-
-	// Parse level filter
-	if level := r.URL.Query().Get("level"); level != "" {
-		filters.Level = level
-	}
-
-	// Parse search query (support both "q" and "search" params)
-	if search := r.URL.Query().Get("q"); search != "" {
-		filters.Search = search
-	} else if search := r.URL.Query().Get("search"); search != "" {
-		filters.Search = search
-	}
-
-	// Parse date range
-	if fromDate := r.URL.Query().Get("from"); fromDate != "" {
-		filters.FromDate = fromDate
-	}
-	if toDate := r.URL.Query().Get("to"); toDate != "" {
-		filters.ToDate = toDate
-	}
-
-	// Parse host filter
-	if hostID := r.URL.Query().Get("host_id"); hostID != "" {
-		if id, err := strconv.ParseInt(hostID, 10, 64); err == nil {
-			filters.HostID = &id
-		}
-	}
-
-	// Parse order
-	if orderBy := r.URL.Query().Get("order_by"); orderBy != "" {
-		filters.OrderBy = orderBy
-	}
-
-	return filters
-}
-
 // getContentType returns the appropriate Content-Type header for the format.
 func getContentType(format ExportFormat) string {
 	switch format {
@@ -162,20 +107,6 @@ func getContentType(format ExportFormat) string {
 		return "application/x-ndjson; charset=utf-8"
 	default:
 		return "application/octet-stream"
-	}
-}
-
-// writeExport writes the logs in the specified format.
-func writeExport(w http.ResponseWriter, logs []LogExportResponse, format ExportFormat) error {
-	switch format {
-	case JSONFormat:
-		return writeJSONExport(w, logs)
-	case CSVFormat:
-		return writeCSVExport(w, logs)
-	case NDJSONFormat:
-		return writeNDJSONExport(w, logs)
-	default:
-		return fmt.Errorf("unsupported export format: %s", format)
 	}
 }
 
@@ -253,34 +184,11 @@ func writeStreamingJSONExport(r *http.Request, w http.ResponseWriter, h *Handler
 
 func writeStreamingCSVExport(r *http.Request, w http.ResponseWriter, h *Handlers, filters ports.LogFilters, exported *int) error {
 	writer := csv.NewWriter(w)
-	header := []string{
-		"id", "host_id", "level", "message", "timestamp", "created_at",
-		"http_method", "http_url", "http_status", "http_duration_ms",
-		"derived_level", "derived_source", "derived_category", "host_name", "host_tags",
-	}
-	if err := writer.Write(header); err != nil {
+	if err := writer.Write(csvHeader()); err != nil {
 		return err
 	}
 	err := h.logRepo.StreamAll(r.Context(), filters, func(logEntry *entities.Log) error {
-		log := logToExportResponse(logEntry)
-		row := []string{
-			strconv.FormatInt(log.ID, 10),
-			strconv.FormatInt(log.HostID, 10),
-			log.Level,
-			log.Message,
-			log.Timestamp,
-			log.CreatedAt,
-			log.HTTPMethod,
-			log.HTTPURL,
-			strconv.Itoa(log.HTTPStatus),
-			strconv.FormatInt(log.HTTPDuration, 10),
-			log.DerivedLevel,
-			log.DerivedSource,
-			log.DerivedCategory,
-			log.HostName,
-			strings.Join(log.HostTags, ";"),
-		}
-		if err := writer.Write(row); err != nil {
+		if err := writer.Write(csvRow(logToExportResponse(logEntry))); err != nil {
 			return err
 		}
 		(*exported)++
@@ -301,67 +209,30 @@ func writeStreamingNDJSONExport(r *http.Request, w http.ResponseWriter, h *Handl
 	})
 }
 
-// writeJSONExport writes logs as a JSON array.
-func writeJSONExport(w http.ResponseWriter, logs []LogExportResponse) error {
-	encoder := json.NewEncoder(w)
-	encoder.SetIndent("", "  ")
-	if len(logs) == 0 {
-		// Return empty array instead of null
-		_, err := w.Write([]byte("[]"))
-		return err
-	}
-	return encoder.Encode(logs)
-}
-
-// writeCSVExport writes logs as CSV.
-func writeCSVExport(w http.ResponseWriter, logs []LogExportResponse) error {
-	writer := csv.NewWriter(w)
-
-	// Write header
-	header := []string{
+func csvHeader() []string {
+	return []string{
 		"id", "host_id", "level", "message", "timestamp", "created_at",
 		"http_method", "http_url", "http_status", "http_duration_ms",
 		"derived_level", "derived_source", "derived_category", "host_name", "host_tags",
 	}
-	if err := writer.Write(header); err != nil {
-		return err
-	}
-
-	// Write data rows
-	for _, log := range logs {
-		row := []string{
-			strconv.FormatInt(log.ID, 10),
-			strconv.FormatInt(log.HostID, 10),
-			log.Level,
-			log.Message,
-			log.Timestamp,
-			log.CreatedAt,
-			log.HTTPMethod,
-			log.HTTPURL,
-			strconv.Itoa(log.HTTPStatus),
-			strconv.FormatInt(log.HTTPDuration, 10),
-			log.DerivedLevel,
-			log.DerivedSource,
-			log.DerivedCategory,
-			log.HostName,
-			strings.Join(log.HostTags, ";"),
-		}
-		if err := writer.Write(row); err != nil {
-			return err
-		}
-	}
-
-	writer.Flush()
-	return writer.Error()
 }
 
-// writeNDJSONExport writes logs as newline-delimited JSON.
-func writeNDJSONExport(w http.ResponseWriter, logs []LogExportResponse) error {
-	encoder := json.NewEncoder(w)
-	for _, log := range logs {
-		if err := encoder.Encode(log); err != nil {
-			return err
-		}
+func csvRow(log LogExportResponse) []string {
+	return []string{
+		strconv.FormatInt(log.ID, 10),
+		strconv.FormatInt(log.HostID, 10),
+		log.Level,
+		log.Message,
+		log.Timestamp,
+		log.CreatedAt,
+		log.HTTPMethod,
+		log.HTTPURL,
+		strconv.Itoa(log.HTTPStatus),
+		strconv.FormatInt(log.HTTPDuration, 10),
+		log.DerivedLevel,
+		log.DerivedSource,
+		log.DerivedCategory,
+		log.HostName,
+		strings.Join(log.HostTags, ";"),
 	}
-	return nil
 }
