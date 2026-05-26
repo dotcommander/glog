@@ -104,7 +104,7 @@ Examples:
 	}
 
 	cmd.Flags().String("server", "", "GLog server URL")
-	cmd.Flags().String("config", "./glog.json", "Path to the configuration file")
+	cmd.Flags().String("config", defaultConfigPath, "Path to the configuration file")
 	cmd.Flags().String("level", "", "Minimum log level to show (trace, debug, info, warn, error, fatal)")
 	cmd.Flags().String("host", "", "Filter by host name")
 	cmd.Flags().Bool("json", false, "Output raw JSON instead of formatted text")

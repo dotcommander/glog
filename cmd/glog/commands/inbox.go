@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -43,7 +42,8 @@ func inboxAddCmd() *cobra.Command {
 		Short: "Add an inbox item",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			server, err := resolveServer(cmd, "")
+			configPath, _ := cmd.Flags().GetString("config")
+			server, err := resolveServer(cmd, configPath)
 			if err != nil {
 				return err
 			}
@@ -77,6 +77,7 @@ func inboxAddCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().String("server", "", "GLog server URL")
+	cmd.Flags().String("config", defaultConfigPath, "Path to the configuration file")
 	cmd.Flags().String("body", "", "Inbox item body")
 	cmd.Flags().String("status", "open", "Status: open, in_progress, blocked, done, dismissed")
 	cmd.Flags().String("kind", "task", "Kind: note, task, question, bug, handoff")
@@ -94,7 +95,8 @@ func inboxListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List inbox items",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			server, err := resolveServer(cmd, "")
+			configPath, _ := cmd.Flags().GetString("config")
+			server, err := resolveServer(cmd, configPath)
 			if err != nil {
 				return err
 			}
@@ -133,6 +135,7 @@ func inboxListCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().String("server", "", "GLog server URL")
+	cmd.Flags().String("config", defaultConfigPath, "Path to the configuration file")
 	cmd.Flags().String("status", "open", "Filter by status")
 	cmd.Flags().String("kind", "", "Filter by kind")
 	cmd.Flags().String("repo", "", "Filter by repository")
@@ -146,7 +149,8 @@ func inboxDoneCmd() *cobra.Command {
 		Short: "Mark an inbox item done",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			server, err := resolveServer(cmd, "")
+			configPath, _ := cmd.Flags().GetString("config")
+			server, err := resolveServer(cmd, configPath)
 			if err != nil {
 				return err
 			}
@@ -159,6 +163,7 @@ func inboxDoneCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().String("server", "", "GLog server URL")
+	cmd.Flags().String("config", defaultConfigPath, "Path to the configuration file")
 	return cmd
 }
 
@@ -178,8 +183,7 @@ func createInboxItem(server string, body map[string]any) (*InboxItemResponse, er
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("create failed (status %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("create failed (status %d): %s", resp.StatusCode, readResponseBodySnippet(resp.Body))
 	}
 	var item InboxItemResponse
 	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {
@@ -212,8 +216,7 @@ func listInboxItems(server, status, kind, repo, sessionID string) ([]InboxItemRe
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("list failed (status %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("list failed (status %d): %s", resp.StatusCode, readResponseBodySnippet(resp.Body))
 	}
 	var result struct {
 		Items []InboxItemResponse `json:"items"`
@@ -235,8 +238,7 @@ func completeInboxItem(server, id string) (*InboxItemResponse, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("complete failed (status %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("complete failed (status %d): %s", resp.StatusCode, readResponseBodySnippet(resp.Body))
 	}
 	var item InboxItemResponse
 	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {

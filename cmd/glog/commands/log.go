@@ -89,7 +89,10 @@ Examples:
 			}
 
 			// Get message from args or stdin
-			message := getMessageFromArgs(args)
+			message, err := getMessageFromArgs(args)
+			if err != nil {
+				return err
+			}
 			if message == "" {
 				return fmt.Errorf("log message is required (provide as argument or via stdin)")
 			}
@@ -109,32 +112,34 @@ Examples:
 	cmd.Flags().String("api-key", "", "API key for authentication")
 	cmd.Flags().String("level", "info", "Log level (trace, debug, info, warn, error, fatal)")
 	cmd.Flags().StringSlice("field", nil, "Additional fields in key=value format (can be used multiple times)")
-	cmd.Flags().String("config", "./glog.json", "Path to the configuration file")
+	cmd.Flags().String("config", defaultConfigPath, "Path to the configuration file")
 	cmd.Flags().Bool("stream", false, "Stream mode: read stdin line by line and send each as a separate log")
 
 	return cmd
 }
 
 // getMessageFromArgs gets the log message from cobra args or stdin.
-func getMessageFromArgs(args []string) string {
+func getMessageFromArgs(args []string) (string, error) {
 	// Try to get from args first
 	if len(args) > 0 {
-		return args[0]
+		return args[0], nil
 	}
 
 	// Check if stdin has data
 	stat, _ := os.Stdin.Stat()
 	if (stat.Mode() & os.ModeCharDevice) == 0 {
 		// Stdin has data, read it
-		data, err := io.ReadAll(os.Stdin)
+		data, err := io.ReadAll(io.LimitReader(os.Stdin, constants.MaxMessageLength+1))
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to read stdin: %v\n", err)
-			return ""
+			return "", fmt.Errorf("failed to read stdin: %w", err)
 		}
-		return strings.TrimSpace(string(data))
+		if len(data) > constants.MaxMessageLength {
+			return "", fmt.Errorf("stdin log message too long (max %d bytes)", constants.MaxMessageLength)
+		}
+		return strings.TrimSpace(string(data)), nil
 	}
 
-	return ""
+	return "", nil
 }
 
 // sendBulkLogs sends multiple log entries to the GLog server via the bulk endpoint.
@@ -174,8 +179,7 @@ func sendBulkLogs(server, apiKey, level string, messages []string, fields map[st
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-		return 0, fmt.Errorf("request failed (status %d): %s", resp.StatusCode, string(body))
+		return 0, fmt.Errorf("request failed (status %d): %s", resp.StatusCode, readResponseBodySnippet(resp.Body))
 	}
 
 	var result struct {
@@ -343,8 +347,7 @@ func sendLog(server, apiKey, level, message string, fields map[string]any) (int6
 
 	// Check response status
 	if resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-		return 0, fmt.Errorf("request failed (status %d): %s", resp.StatusCode, string(body))
+		return 0, fmt.Errorf("request failed (status %d): %s", resp.StatusCode, readResponseBodySnippet(resp.Body))
 	}
 
 	// Parse response

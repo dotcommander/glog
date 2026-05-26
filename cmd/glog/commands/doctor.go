@@ -48,7 +48,7 @@ checks a running server, and prints concrete next commands.`,
 		},
 	}
 
-	cmd.Flags().String("config", "./glog.json", "Path to CLI config file")
+	cmd.Flags().String("config", defaultConfigPath, "Path to CLI config file")
 	cmd.Flags().String("server", "", "GLog server URL to check")
 	return cmd
 }

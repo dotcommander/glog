@@ -4,13 +4,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
+
+const defaultConfigPath = "./glog.json"
 
 // resolveServer resolves the server URL from flag, env var, or config file.
 func resolveServer(cmd *cobra.Command, configPath string) (string, error) {
@@ -19,6 +21,9 @@ func resolveServer(cmd *cobra.Command, configPath string) (string, error) {
 		server = os.Getenv("GLOG_SERVER")
 	}
 	if server == "" {
+		if configPath == "" {
+			configPath = defaultConfigPath
+		}
 		if config, err := loadConfig(configPath); err == nil {
 			server = config.Server
 		}
@@ -26,7 +31,7 @@ func resolveServer(cmd *cobra.Command, configPath string) (string, error) {
 	if server == "" {
 		return "", fmt.Errorf("server is required (provide --server or set GLOG_SERVER)")
 	}
-	return server, nil
+	return normalizeServerURL(server), nil
 }
 
 // resolveAPIKey resolves the API key from flag, env var, or config file.
@@ -36,6 +41,9 @@ func resolveAPIKey(cmd *cobra.Command, configPath string) (string, error) {
 		apiKey = os.Getenv("GLOG_API_KEY")
 	}
 	if apiKey == "" {
+		if configPath == "" {
+			configPath = defaultConfigPath
+		}
 		if config, err := loadConfig(configPath); err == nil {
 			apiKey = config.APIKey
 		}
@@ -44,6 +52,10 @@ func resolveAPIKey(cmd *cobra.Command, configPath string) (string, error) {
 		return "", fmt.Errorf("API key is required (provide --api-key or run 'glog host register' first)")
 	}
 	return apiKey, nil
+}
+
+func normalizeServerURL(server string) string {
+	return strings.TrimRight(strings.TrimSpace(server), "/")
 }
 
 // HostCmd creates the host command.
@@ -136,7 +148,8 @@ func hostListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List all registered hosts",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			server, err := resolveServer(cmd, "")
+			configPath, _ := cmd.Flags().GetString("config")
+			server, err := resolveServer(cmd, configPath)
 			if err != nil {
 				return err
 			}
@@ -173,6 +186,7 @@ func hostListCmd() *cobra.Command {
 	}
 
 	cmd.Flags().String("server", "", "GLog server URL")
+	cmd.Flags().String("config", defaultConfigPath, "Path to the configuration file")
 
 	return cmd
 }
@@ -237,8 +251,7 @@ func registerHost(server, name string, tags []string, description, hostname, ip 
 
 	// Check response status
 	if resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("registration failed (status %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("registration failed (status %d): %s", resp.StatusCode, readResponseBodySnippet(resp.Body))
 	}
 
 	// Parse response
@@ -264,8 +277,7 @@ func listHosts(server string) ([]HostRegistrationResponse, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("request failed (status %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("request failed (status %d): %s", resp.StatusCode, readResponseBodySnippet(resp.Body))
 	}
 
 	// Parse response
