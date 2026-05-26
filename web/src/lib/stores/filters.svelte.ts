@@ -48,7 +48,7 @@ class FiltersStore {
     const params = new URLSearchParams();
 
     // Add level filters
-    this.filters.level?.forEach(level => params.append('level', level));
+    this.filters.level?.forEach((level: string) => params.append('level', level));
 
     // Add search filter
     if (this.filters.search) {
@@ -88,7 +88,7 @@ class FiltersStore {
   }
 
   removeLevel(level: string) {
-    this.filters.level = this.filters.level?.filter(l => l !== level) || [];
+    this.filters.level = this.filters.level?.filter((l: string) => l !== level) || [];
     this.filters.offset = 0;
     this.updateURL();
   }

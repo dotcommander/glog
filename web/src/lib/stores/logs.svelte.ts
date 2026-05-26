@@ -26,7 +26,7 @@ class LogsStore {
     const params = new URLSearchParams();
 
     if (filters.level && filters.level.length > 0) {
-      filters.level.forEach(level => params.append('level', level));
+      filters.level.forEach((level: string) => params.append('level', level));
     }
 
     if (filters.search) {

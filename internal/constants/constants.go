@@ -62,6 +62,8 @@ const (
 	DefaultLimit         = 100
 	MaxLimit             = 1000
 	FutureTimestampLimit = 5 * time.Minute
+	MaxErrorBodyBytes    = 64 * 1024
+	MaxRequestBodyBytes  = 12 * 1024 * 1024
 )
 
 // Log levels

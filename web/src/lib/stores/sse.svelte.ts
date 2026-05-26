@@ -1,7 +1,7 @@
 import { browser } from '$app/environment';
 import { logsStore } from './logs.svelte';
 import { hostsStore } from './hosts.svelte';
-import type { SSEEvent } from '$lib/types';
+import type { Log, SSEEvent } from '$lib/types';
 
 class SSEStore {
   eventSource: EventSource | null = $state(null);
@@ -72,7 +72,7 @@ class SSEStore {
         try {
           const logData = JSON.parse(event.data);
           // Remove log from store
-          logsStore.logs = logsStore.logs.filter(log => log.id !== logData.id);
+          logsStore.logs = logsStore.logs.filter((log: Log) => log.id !== logData.id);
           logsStore.total = Math.max(0, logsStore.total - 1);
         } catch (err) {
           console.error('Failed to parse log deleted event:', err);
