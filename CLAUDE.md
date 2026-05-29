@@ -655,4 +655,4 @@ MIT License - see LICENSE file for details
 ---
 
 **Last Updated**: 2026-05-20
-**Version**: see `CHANGELOG.md` for the latest released version (currently v0.3.0)
+**Version**: see `CHANGELOG.md` for the latest released version (currently v0.4.0)

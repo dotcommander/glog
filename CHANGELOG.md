@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.4.0 (2026-05-29)
+
+### Features
+
+- add CLI config fallback coverage and bounded HTTP error-body handling
+
+### Improvements
+
+- split log HTTP handlers into focused read/write/filter helpers
+- validate export level filters and reject unknown JSON request fields
+- cap JSON request bodies and stdin log message reads
+- add dashboard typecheck script and favicon/static asset tracking
+- add dashboard `just` recipe and refresh maintenance notes
+
 ## v0.3.0 (2026-05-15)
 
 ### Features
