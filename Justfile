@@ -17,7 +17,7 @@ default:
 build-web:
     cd web && bun run build
 
-# Install the current CLI to ~/go/bin/glog.
+# Install the current CLI to /Users/vampire/code/go/bin/glog.
 install-cli:
     go install ./cmd/glog
 

@@ -8,15 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/spf13/cobra"
 )
 
 const defaultConfigPath = "./glog.json"
 
 // resolveServer resolves the server URL from flag, env var, or config file.
-func resolveServer(cmd *cobra.Command, configPath string) (string, error) {
-	server, _ := cmd.Flags().GetString("server")
+func resolveServer(server, configPath string) (string, error) {
 	if server == "" {
 		server = os.Getenv("GLOG_SERVER")
 	}
@@ -35,8 +32,7 @@ func resolveServer(cmd *cobra.Command, configPath string) (string, error) {
 }
 
 // resolveAPIKey resolves the API key from flag, env var, or config file.
-func resolveAPIKey(cmd *cobra.Command, configPath string) (string, error) {
-	apiKey, _ := cmd.Flags().GetString("api-key")
+func resolveAPIKey(apiKey, configPath string) (string, error) {
 	if apiKey == "" {
 		apiKey = os.Getenv("GLOG_API_KEY")
 	}
@@ -58,137 +54,101 @@ func normalizeServerURL(server string) string {
 	return strings.TrimRight(strings.TrimSpace(server), "/")
 }
 
-// HostCmd creates the host command.
-func HostCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "host",
-		Short: "Manage hosts",
-	}
-
-	cmd.AddCommand(hostRegisterCmd(), hostListCmd())
-	return cmd
+type HostCommand struct {
+	Register HostRegisterCommand `cmd:"" help:"Register a new host with the GLog server."`
+	List     HostListCommand     `cmd:"" help:"List all registered hosts."`
 }
 
-func hostRegisterCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "register",
-		Short: "Register a new host with the GLog server",
-		Long: `Register a new host to start sending logs.
-
-This command will:
-- Create a new host on the GLog server
-- Generate a unique API key for authentication
-- Save the configuration to a file for future use
-
-Example:
-  glog host register --server https://logs.example.com --name "production-api" --tag production --tag api`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			configPath, _ := cmd.Flags().GetString("config")
-			server, err := resolveServer(cmd, configPath)
-			if err != nil {
-				return err
-			}
-
-			name, _ := cmd.Flags().GetString("name")
-			tags, _ := cmd.Flags().GetStringSlice("tag")
-			description, _ := cmd.Flags().GetString("description")
-			hostname, _ := cmd.Flags().GetString("hostname")
-			ip, _ := cmd.Flags().GetString("ip")
-
-			fmt.Printf("Registering host '%s' with server %s...\n", name, server)
-
-			// Call API to register host
-			host, err := registerHost(server, name, tags, description, hostname, ip)
-			if err != nil {
-				return fmt.Errorf("failed to register host: %w", err)
-			}
-
-			fmt.Printf("\n✓ Host registered successfully!\n")
-			fmt.Printf("  Name: %s\n", host.Name)
-			fmt.Printf("  API Key: %s\n", host.APIKey)
-			fmt.Printf("  Tags: %v\n", host.Tags)
-			if host.Description != "" {
-				fmt.Printf("  Description: %s\n", host.Description)
-			}
-
-			// Save configuration
-			config := &CLIConfig{
-				Server:   server,
-				APIKey:   host.APIKey,
-				HostID:   host.ID,
-				HostName: host.Name,
-			}
-
-			if err := saveConfig(configPath, config); err != nil {
-				fmt.Printf("\n⚠ Warning: Failed to save config: %v\n", err)
-				fmt.Printf("Please save the API key above manually.\n")
-			} else {
-				fmt.Printf("\n✓ Configuration saved to: %s\n", configPath)
-				fmt.Printf("  You can now use 'glog log' to send logs without specifying --server or --api-key\n")
-			}
-
-			return nil
-		},
-	}
-
-	cmd.Flags().String("server", "", "GLog server URL (e.g., https://logs.example.com)")
-	cmd.Flags().String("name", "", "Host name (must be unique)")
-	cmd.Flags().StringSlice("tag", nil, "Tags for categorizing the host (can be used multiple times)")
-	cmd.Flags().String("description", "", "Optional description of the host")
-	cmd.Flags().String("config", "./glog.json", "Path to save the configuration file")
-	cmd.Flags().String("hostname", "", "Actual hostname of the machine")
-	cmd.Flags().String("ip", "", "IP address of the host")
-	_ = cmd.MarkFlagRequired("name")
-
-	return cmd
+type HostRegisterCommand struct {
+	Server      string   `help:"GLog server URL (e.g., https://logs.example.com)."`
+	Name        string   `required:"" help:"Host name (must be unique)."`
+	Tags        []string `name:"tag" help:"Tags for categorizing the host."`
+	Description string   `help:"Optional description of the host."`
+	Config      string   `default:"./glog.json" type:"path" help:"Path to save the configuration file."`
+	Hostname    string   `help:"Actual hostname of the machine."`
+	IP          string   `help:"IP address of the host."`
 }
 
-func hostListCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List all registered hosts",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			configPath, _ := cmd.Flags().GetString("config")
-			server, err := resolveServer(cmd, configPath)
-			if err != nil {
-				return err
-			}
-
-			fmt.Printf("Fetching hosts from %s...\n", server)
-
-			hosts, err := listHosts(server)
-			if err != nil {
-				return fmt.Errorf("failed to list hosts: %w", err)
-			}
-
-			if len(hosts) == 0 {
-				fmt.Println("No hosts registered")
-				return nil
-			}
-
-			fmt.Printf("\nFound %d host(s):\n\n", len(hosts))
-			for _, host := range hosts {
-				fmt.Printf("ID: %d\n", host.ID)
-				fmt.Printf("Name: %s\n", host.Name)
-				fmt.Printf("Status: %s\n", host.Status)
-				fmt.Printf("Tags: %v\n", host.Tags)
-				fmt.Printf("Created: %s\n", host.CreatedAt)
-				fmt.Printf("Last seen: %s\n", host.LastSeen)
-				fmt.Printf("Logs: %d\n", host.LogCount)
-				if host.Description != "" {
-					fmt.Printf("Description: %s\n", host.Description)
-				}
-				fmt.Println()
-			}
-
-			return nil
-		},
+func (c *HostRegisterCommand) Run() error {
+	server, err := resolveServer(c.Server, c.Config)
+	if err != nil {
+		return err
 	}
 
-	cmd.Flags().String("server", "", "GLog server URL")
-	cmd.Flags().String("config", defaultConfigPath, "Path to the configuration file")
+	fmt.Printf("Registering host '%s' with server %s...\n", c.Name, server)
 
-	return cmd
+	// Call API to register host
+	host, err := registerHost(server, c.Name, c.Tags, c.Description, c.Hostname, c.IP)
+	if err != nil {
+		return fmt.Errorf("failed to register host: %w", err)
+	}
+
+	fmt.Printf("\n✓ Host registered successfully!\n")
+	fmt.Printf("  Name: %s\n", host.Name)
+	fmt.Printf("  API Key: %s\n", host.APIKey)
+	fmt.Printf("  Tags: %v\n", host.Tags)
+	if host.Description != "" {
+		fmt.Printf("  Description: %s\n", host.Description)
+	}
+
+	// Save configuration
+	config := &CLIConfig{
+		Server:   server,
+		APIKey:   host.APIKey,
+		HostID:   host.ID,
+		HostName: host.Name,
+	}
+
+	if err := saveConfig(c.Config, config); err != nil {
+		fmt.Printf("\n⚠ Warning: Failed to save config: %v\n", err)
+		fmt.Printf("Please save the API key above manually.\n")
+	} else {
+		fmt.Printf("\n✓ Configuration saved to: %s\n", c.Config)
+		fmt.Printf("  You can now use 'glog log' to send logs without specifying --server or --api-key\n")
+	}
+
+	return nil
+}
+
+type HostListCommand struct {
+	Server string `help:"GLog server URL."`
+	Config string `default:"./glog.json" type:"path" help:"Path to the configuration file."`
+}
+
+func (c *HostListCommand) Run() error {
+	server, err := resolveServer(c.Server, c.Config)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Fetching hosts from %s...\n", server)
+
+	hosts, err := listHosts(server)
+	if err != nil {
+		return fmt.Errorf("failed to list hosts: %w", err)
+	}
+
+	if len(hosts) == 0 {
+		fmt.Println("No hosts registered")
+		return nil
+	}
+
+	fmt.Printf("\nFound %d host(s):\n\n", len(hosts))
+	for _, host := range hosts {
+		fmt.Printf("ID: %d\n", host.ID)
+		fmt.Printf("Name: %s\n", host.Name)
+		fmt.Printf("Status: %s\n", host.Status)
+		fmt.Printf("Tags: %v\n", host.Tags)
+		fmt.Printf("Created: %s\n", host.CreatedAt)
+		fmt.Printf("Last seen: %s\n", host.LastSeen)
+		fmt.Printf("Logs: %d\n", host.LogCount)
+		if host.Description != "" {
+			fmt.Printf("Description: %s\n", host.Description)
+		}
+		fmt.Println()
+	}
+
+	return nil
 }
 
 // HostRegistrationResponse represents the response from the host registration API.

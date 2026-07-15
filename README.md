@@ -200,7 +200,7 @@ Go backend. Svelte 5 frontend. SQLite in WAL mode. Everything runs from one bina
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  CLI (cobra)          Browser (Svelte 5)        │
+│  CLI (Kong)           Browser (Svelte 5)        │
 │  glog log/host/serve  localhost:6016            │
 └──────────┬────────────────────┬─────────────────┘
            │                    │

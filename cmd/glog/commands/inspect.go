@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/dotcommander/glog/internal/infrastructure/persistence/sqlite"
-	"github.com/spf13/cobra"
 )
 
 type inspectDBReport struct {
@@ -46,45 +45,33 @@ type inspectFingerprint struct {
 	Count       int64  `json:"count"`
 }
 
-// InspectCmd creates the inspect command group.
-func InspectCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "inspect",
-		Short: "Inspect GLog data files offline",
-	}
-	cmd.AddCommand(inspectDBCmd())
-	return cmd
+type InspectCommand struct {
+	DB InspectDBCommand `cmd:"" help:"Inspect a SQLite GLog database."`
 }
 
-func inspectDBCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "db",
-		Short: "Inspect a SQLite GLog database",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			dbPath, _ := cmd.Flags().GetString("db")
-			jsonOut, _ := cmd.Flags().GetBool("json")
-			db, err := sqlite.New(dbPath)
-			if err != nil {
-				return err
-			}
-			defer db.Close()
+type InspectDBCommand struct {
+	DB   string `default:"glog.db" type:"path" help:"Database file path."`
+	JSON bool   `help:"Output JSON."`
+}
 
-			report, err := buildInspectDBReport(db)
-			if err != nil {
-				return err
-			}
-			if jsonOut {
-				enc := json.NewEncoder(os.Stdout)
-				enc.SetIndent("", "  ")
-				return enc.Encode(report)
-			}
-			printInspectDBReport(report)
-			return nil
-		},
+func (c *InspectDBCommand) Run() error {
+	db, err := sqlite.New(c.DB)
+	if err != nil {
+		return err
 	}
-	cmd.Flags().String("db", "glog.db", "Database file path")
-	cmd.Flags().Bool("json", false, "Output JSON")
-	return cmd
+	defer db.Close()
+
+	report, err := buildInspectDBReport(db)
+	if err != nil {
+		return err
+	}
+	if c.JSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(report)
+	}
+	printInspectDBReport(report)
+	return nil
 }
 
 func buildInspectDBReport(db *sqlite.Database) (*inspectDBReport, error) {

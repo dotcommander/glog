@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/dotcommander/glog/internal/constants"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -28,97 +27,60 @@ var (
 	}
 )
 
-// LogCmd creates the log command.
-func LogCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "log [message]",
-		Short: "Send logs to the GLog server",
-		Long: `Send log entries to the GLog server from the command line.
-
-The log can be provided as:
-1. Command line argument: glog log "Application started"
-2. Via stdin: echo "Error occurred" | glog log --level error
-3. Streaming: journalctl -f | glog log --stream --level info
-
-If no config file exists, --server and --api-key are required.
-Otherwise, they can be loaded from the config file (default: ./glog.json).
-
-Examples:
-  # Send an info log (using config file)
-  glog log "User login successful"
-
-  # Send an error log
-  glog log --level error "Database connection failed"
-
-  # Send from stdin (waits for EOF)
-  cat application.log | glog log --level info
-
-  # Stream continuously (line by line, for journalctl -f etc)
-  journalctl -f | glog log --stream --level info
-  tail -f /var/log/syslog | glog log --stream --level info
-
-  # Send with additional fields
-  glog log --level warn --field retry_count=3 "API rate limit warning"`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			level, _ := cmd.Flags().GetString("level")
-			fields, _ := cmd.Flags().GetStringSlice("field")
-			configPath, _ := cmd.Flags().GetString("config")
-			streamMode, _ := cmd.Flags().GetBool("stream")
-
-			// Resolve server and API key from flag → env → config
-			server, err := resolveServer(cmd, configPath)
-			if err != nil {
-				return err
-			}
-			apiKey, err := resolveAPIKey(cmd, configPath)
-			if err != nil {
-				return err
-			}
-
-			// Parse fields
-			fieldMap := parseFields(fields)
-
-			// Validate log level
-			if !constants.IsValidLogLevel(level) {
-				return fmt.Errorf("invalid level '%s'. Must be one of: %s", level, strings.Join(constants.ValidLogLevels, ", "))
-			}
-
-			// Stream mode: read stdin line by line
-			if streamMode {
-				return streamLogs(server, apiKey, level, fieldMap)
-			}
-
-			// Get message from args or stdin
-			message, err := getMessageFromArgs(args)
-			if err != nil {
-				return err
-			}
-			if message == "" {
-				return fmt.Errorf("log message is required (provide as argument or via stdin)")
-			}
-
-			// Send log
-			logID, err := sendLog(server, apiKey, level, message, fieldMap)
-			if err != nil {
-				return fmt.Errorf("failed to send log: %w", err)
-			}
-
-			fmt.Printf("✓ Log sent successfully (ID: %d)\n", logID)
-			return nil
-		},
-	}
-
-	cmd.Flags().String("server", "", "GLog server URL")
-	cmd.Flags().String("api-key", "", "API key for authentication")
-	cmd.Flags().String("level", "info", "Log level (trace, debug, info, warn, error, fatal)")
-	cmd.Flags().StringSlice("field", nil, "Additional fields in key=value format (can be used multiple times)")
-	cmd.Flags().String("config", defaultConfigPath, "Path to the configuration file")
-	cmd.Flags().Bool("stream", false, "Stream mode: read stdin line by line and send each as a separate log")
-
-	return cmd
+type LogCommand struct {
+	Message []string `arg:"" optional:"" help:"Log message; reads stdin when omitted."`
+	Server  string   `help:"GLog server URL."`
+	APIKey  string   `name:"api-key" help:"API key for authentication."`
+	Level   string   `default:"info" help:"Log level: trace, debug, info, warn, error, or fatal."`
+	Fields  []string `name:"field" help:"Additional field in key=value format."`
+	Config  string   `default:"./glog.json" type:"path" help:"Path to the configuration file."`
+	Stream  bool     `help:"Read stdin line by line and send each as a separate log."`
 }
 
-// getMessageFromArgs gets the log message from cobra args or stdin.
+func (c *LogCommand) Run() error {
+	// Resolve server and API key from flag → env → config
+	server, err := resolveServer(c.Server, c.Config)
+	if err != nil {
+		return err
+	}
+	apiKey, err := resolveAPIKey(c.APIKey, c.Config)
+	if err != nil {
+		return err
+	}
+
+	// Parse fields
+	fieldMap := parseFields(c.Fields)
+
+	// Validate log level
+	if !constants.IsValidLogLevel(c.Level) {
+		return fmt.Errorf("invalid level '%s'. Must be one of: %s", c.Level, strings.Join(constants.ValidLogLevels, ", "))
+	}
+
+	// Stream mode: read stdin line by line
+	if c.Stream {
+		return streamLogs(server, apiKey, c.Level, fieldMap)
+	}
+
+	// Get message from args or stdin
+	message, err := getMessageFromArgs(c.Message)
+	if err != nil {
+		return err
+	}
+	if message == "" {
+		return fmt.Errorf("log message is required (provide as argument or via stdin)")
+	}
+
+	// Send log
+	logID, err := sendLog(server, apiKey, c.Level, message, fieldMap)
+	if err != nil {
+		return fmt.Errorf("failed to send log: %w", err)
+	}
+
+	fmt.Printf("✓ Log sent successfully (ID: %d)\n", logID)
+	return nil
+}
+
+// getMessageFromArgs gets the log message from arguments or stdin.
 func getMessageFromArgs(args []string) (string, error) {
 	// Try to get from args first
 	if len(args) > 0 {
@@ -363,14 +325,10 @@ func sendLog(server, apiKey, level, message string, fields map[string]any) (int6
 	return result.ID, nil
 }
 
-// VersionCmd creates the version command.
-func VersionCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "version",
-		Short: "Print version information",
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("GLog version: %s\n", Version)
-			fmt.Printf("Build time: %s\n", BuildTime)
-		},
-	}
+type VersionCommand struct{}
+
+func (VersionCommand) Run() error {
+	fmt.Printf("GLog version: %s\n", Version)
+	fmt.Printf("Build time: %s\n", BuildTime)
+	return nil
 }

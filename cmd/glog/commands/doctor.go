@@ -8,49 +8,34 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"github.com/spf13/cobra"
 )
 
-// DoctorCmd creates the doctor command.
-func DoctorCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "doctor",
-		Short: "Check first-run setup and print next steps",
-		Long: `Check a local GLog CLI installation.
+type DoctorCommand struct {
+	Config string `default:"./glog.json" type:"path" help:"Path to CLI config file."`
+	Server string `help:"GLog server URL to check."`
+}
 
-The doctor command is intended for first-time installers. It verifies that the
-glog binary can be found from PATH, reports local CLI config status, optionally
-checks a running server, and prints concrete next commands.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			configPath, _ := cmd.Flags().GetString("config")
-			serverFlag, _ := cmd.Flags().GetString("server")
+func (c *DoctorCommand) Run() error {
 
-			fmt.Println("GLog doctor")
-			fmt.Printf("Version: %s\n", Version)
-			if BuildTime != "" && BuildTime != "unknown" {
-				fmt.Printf("Build time: %s\n", BuildTime)
-			}
-			fmt.Println()
-
-			checkPath()
-			config, hasConfig := checkConfig(configPath)
-			server := serverFlag
-			if server == "" {
-				server = os.Getenv("GLOG_SERVER")
-			}
-			if server == "" && hasConfig {
-				server = config.Server
-			}
-			serverOK := checkServer(server)
-			printFirstRunNextSteps(configPath, hasConfig, server, serverOK)
-			return nil
-		},
+	fmt.Println("GLog doctor")
+	fmt.Printf("Version: %s\n", Version)
+	if BuildTime != "" && BuildTime != "unknown" {
+		fmt.Printf("Build time: %s\n", BuildTime)
 	}
+	fmt.Println()
 
-	cmd.Flags().String("config", defaultConfigPath, "Path to CLI config file")
-	cmd.Flags().String("server", "", "GLog server URL to check")
-	return cmd
+	checkPath()
+	config, hasConfig := checkConfig(c.Config)
+	server := c.Server
+	if server == "" {
+		server = os.Getenv("GLOG_SERVER")
+	}
+	if server == "" && hasConfig {
+		server = config.Server
+	}
+	serverOK := checkServer(server)
+	printFirstRunNextSteps(c.Config, hasConfig, server, serverOK)
+	return nil
 }
 
 func checkPath() {

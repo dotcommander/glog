@@ -1,12 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime/debug"
 
+	"github.com/alecthomas/kong"
 	"github.com/dotcommander/glog/cmd/glog/commands"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -28,26 +29,26 @@ func main() {
 	commands.Version = Version
 	commands.BuildTime = BuildTime
 
-	rootCmd := &cobra.Command{
-		Use:     "glog",
-		Short:   "Local-first log utility, dashboard, and agent debugging workspace",
-		Long:    "A local-first log utility with a live dashboard, SQLite storage, and agent debugging workflows",
-		Version: Version,
+	var cli struct {
+		VersionFlag kong.VersionFlag        `name:"version" short:"v" help:"Print version information and quit."`
+		Serve       commands.ServeCommand   `cmd:"" help:"Start the GLog server."`
+		Migrate     commands.MigrateCommand `cmd:"" help:"Run database migrations."`
+		Host        commands.HostCommand    `cmd:"" help:"Manage hosts."`
+		Inspect     commands.InspectCommand `cmd:"" help:"Inspect GLog data files offline."`
+		Inbox       commands.InboxCommand   `cmd:"" help:"Manage agent inbox notes and tasks."`
+		Doctor      commands.DoctorCommand  `cmd:"" help:"Check first-run setup and print next steps."`
+		Log         commands.LogCommand     `cmd:"" help:"Send logs to the GLog server."`
+		Tail        commands.TailCommand    `cmd:"" help:"Stream live logs from the GLog server."`
+		Version     commands.VersionCommand `cmd:"" help:"Print version information."`
 	}
-
-	rootCmd.AddCommand(
-		commands.ServeCmd(),
-		commands.MigrateCmd(),
-		commands.HostCmd(),
-		commands.InspectCmd(),
-		commands.InboxCmd(),
-		commands.DoctorCmd(),
-		commands.LogCmd(),
-		commands.TailCmd(),
-		commands.VersionCmd(),
+	ctx := kong.Parse(&cli,
+		kong.Name("glog"),
+		kong.Description("A local-first log utility with a live dashboard, SQLite storage, and agent debugging workflows."),
+		kong.Vars{"version": Version},
+		kong.UsageOnError(),
+		kong.BindTo(context.Background(), (*context.Context)(nil)),
 	)
-
-	if err := rootCmd.Execute(); err != nil {
+	if err := ctx.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

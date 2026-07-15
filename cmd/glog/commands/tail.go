@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/dotcommander/glog/internal/domain/entities"
-	"github.com/spf13/cobra"
 )
 
 // ANSI color codes for log levels.
@@ -47,69 +46,40 @@ type tailHostInfo struct {
 	Status string   `json:"status,omitempty"`
 }
 
-// TailCmd creates the tail command.
-func TailCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "tail",
-		Short: "Stream live logs from the GLog server",
-		Long: `Connect to the GLog server's SSE endpoint and stream logs in real time.
+type TailCommand struct {
+	Server string `help:"GLog server URL."`
+	Config string `default:"./glog.json" type:"path" help:"Path to the configuration file."`
+	Level  string `help:"Minimum log level to show."`
+	Host   string `help:"Filter by host name."`
+	JSON   bool   `help:"Output raw JSON instead of formatted text."`
+}
 
-Output is color-coded by log level. Use --level to filter by minimum severity
-and --host to filter by host name.
-
-Examples:
-  # Stream all logs
-  glog tail --server http://localhost:6016
-
-  # Only errors and above
-  glog tail --level error
-
-  # Filter by host name
-  glog tail --host prod-api
-
-  # Raw JSON output
-  glog tail --json`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			configPath, _ := cmd.Flags().GetString("config")
-			server, err := resolveServer(cmd, configPath)
-			if err != nil {
-				return err
-			}
-
-			levelFilter, _ := cmd.Flags().GetString("level")
-			hostFilter, _ := cmd.Flags().GetString("host")
-			jsonOutput, _ := cmd.Flags().GetBool("json")
-
-			// Validate level filter if provided
-			if levelFilter != "" {
-				if _, ok := entities.LogPriority[entities.LogLevel(levelFilter)]; !ok {
-					return fmt.Errorf("invalid level filter '%s'. Must be one of: trace, debug, info, warn, error, fatal", levelFilter)
-				}
-			}
-
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			// Handle graceful shutdown
-			sigCh := make(chan os.Signal, 1)
-			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-			go func() {
-				<-sigCh
-				fmt.Fprintln(os.Stderr, "\nDisconnecting...")
-				cancel()
-			}()
-
-			return tailLogs(ctx, server, levelFilter, hostFilter, jsonOutput)
-		},
+func (c *TailCommand) Run(ctx context.Context) error {
+	server, err := resolveServer(c.Server, c.Config)
+	if err != nil {
+		return err
 	}
 
-	cmd.Flags().String("server", "", "GLog server URL")
-	cmd.Flags().String("config", defaultConfigPath, "Path to the configuration file")
-	cmd.Flags().String("level", "", "Minimum log level to show (trace, debug, info, warn, error, fatal)")
-	cmd.Flags().String("host", "", "Filter by host name")
-	cmd.Flags().Bool("json", false, "Output raw JSON instead of formatted text")
+	// Validate level filter if provided
+	if c.Level != "" {
+		if _, ok := entities.LogPriority[entities.LogLevel(c.Level)]; !ok {
+			return fmt.Errorf("invalid level filter '%s'. Must be one of: trace, debug, info, warn, error, fatal", c.Level)
+		}
+	}
 
-	return cmd
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Handle graceful shutdown
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		fmt.Fprintln(os.Stderr, "\nDisconnecting...")
+		cancel()
+	}()
+
+	return tailLogs(ctx, server, c.Level, c.Host, c.JSON)
 }
 
 // tailLogs connects to the SSE endpoint and streams logs with reconnection.

@@ -3,8 +3,6 @@ package commands
 import (
 	"strings"
 	"testing"
-
-	"github.com/spf13/cobra"
 )
 
 func TestResolveServerUsesDefaultConfigAndNormalizesURL(t *testing.T) {
@@ -19,11 +17,7 @@ func TestResolveServerUsesDefaultConfigAndNormalizesURL(t *testing.T) {
 		t.Fatalf("saveConfig() error = %v", err)
 	}
 
-	cmd := &cobra.Command{}
-	cmd.Flags().String("server", "", "")
-	cmd.Flags().String("api-key", "", "")
-
-	server, err := resolveServer(cmd, "")
+	server, err := resolveServer("", "")
 	if err != nil {
 		t.Fatalf("resolveServer() error = %v", err)
 	}
@@ -31,7 +25,7 @@ func TestResolveServerUsesDefaultConfigAndNormalizesURL(t *testing.T) {
 		t.Fatalf("server = %q; want normalized default config URL", server)
 	}
 
-	apiKey, err := resolveAPIKey(cmd, "")
+	apiKey, err := resolveAPIKey("", "")
 	if err != nil {
 		t.Fatalf("resolveAPIKey() error = %v", err)
 	}
