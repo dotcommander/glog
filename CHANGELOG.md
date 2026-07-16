@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.2 (2026-07-16)
+
+### Fixes
+
+- track dashboard log components so clean Linux release builds include their source
+
 ## v0.4.1 (2026-07-16)
 
 ### Improvements

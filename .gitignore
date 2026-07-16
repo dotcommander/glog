@@ -55,6 +55,9 @@ Desktop.ini
 # Web app static assets may be images even when a user has global image ignores.
 !web/static/
 !web/static/favicon.png
+# Dashboard source must outrank a user-level logs/ ignore rule.
+!web/src/lib/components/logs/
+!web/src/lib/components/logs/**
 
 # Build directories
 build/
