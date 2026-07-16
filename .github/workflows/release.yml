@@ -20,6 +20,31 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Verify dashboard
+        run: |
+          set -euo pipefail
+          cd web
+          bun install --frozen-lockfile
+          bun run check
+          bun run build
+          cd ..
+          if [ -n "$(git status --porcelain -- web/build)" ]; then
+            git status --short -- web/build
+            echo "web/build is stale; rebuild and commit the embedded dashboard"
+            exit 1
+          fi
+
+      - name: Verify Go
+        run: |
+          set -euo pipefail
+          go mod tidy -diff
+          go build ./...
+          go test ./... -timeout 5m
+          go vet ./...
+
       - name: Build archives
         env:
           TAG: ${{ github.ref_name }}

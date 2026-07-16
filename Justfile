@@ -17,7 +17,7 @@ default:
 build-web:
     cd web && bun run build
 
-# Install the current CLI to /Users/vampire/code/go/bin/glog.
+# Install the current CLI to the active GOPATH bin directory.
 install-cli:
     go install ./cmd/glog
 

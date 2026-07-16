@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.1 (2026-07-16)
+
+### Improvements
+
+- migrate CLI command parsing from Cobra to Kong while preserving version and shell-completion compatibility
+- embed the compiled dashboard so release binaries serve the UI without external assets
+- refresh Go and dashboard dependencies and remove deprecated real-IP middleware
+- verify Go, frontend, and embedded-dashboard freshness before publishing tag assets
+
 ## v0.4.0 (2026-05-29)
 
 ### Features

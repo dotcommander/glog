@@ -16,6 +16,7 @@ import (
 	"github.com/dotcommander/glog/internal/infrastructure/metrics"
 	"github.com/dotcommander/glog/internal/infrastructure/persistence/sqlite"
 	"github.com/dotcommander/glog/internal/infrastructure/sse"
+	webui "github.com/dotcommander/glog/web"
 )
 
 type ServeCommand struct {
@@ -28,6 +29,10 @@ type ServeCommand struct {
 func (c *ServeCommand) Run(ctx context.Context) error {
 	if !constants.IsValidDurabilityProfile(c.Durability) {
 		return fmt.Errorf("invalid durability profile %q: must be strict, balanced, or fast", c.Durability)
+	}
+	dashboard, dashboardErr := webui.FS()
+	if dashboardErr != nil {
+		return fmt.Errorf("load embedded dashboard: %w", dashboardErr)
 	}
 
 	// Parse address to extract host and port
@@ -97,6 +102,7 @@ func (c *ServeCommand) Run(ctx context.Context) error {
 		WriteTimeout: constants.WriteTimeout,
 		IdleTimeout:  constants.IdleTimeout,
 		WebDir:       c.Web,
+		WebFS:        dashboard,
 	}
 	server := httpinfra.NewServer(deps, config)
 	slog.Info("Starting GLog server", "host", host, "port", port)

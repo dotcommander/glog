@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,6 +20,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 )
+
+const dashboardIndex = "index.html"
 
 // RouterDeps holds dependencies for creating the router.
 type RouterDeps struct {
@@ -137,46 +139,9 @@ func NewRouter(deps *RouterDeps, config *Config) chi.Router {
 	healthHandler := handlers.NewHealthHandler(deps.DB, deps.Hub)
 	r.Get("/health", healthHandler.ServeHTTP)
 
-	// Static file serving for SvelteKit frontend
-	if config != nil && config.WebDir != "" {
-		webDir := config.WebDir
-		// Verify directory exists
-		if info, err := os.Stat(webDir); err == nil && info.IsDir() {
-			slog.Info("serving static files", "path", webDir)
-
-			// Create file server
-			fileServer := http.FileServer(http.Dir(webDir))
-
-			// Serve static files and SPA fallback
-			r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
-				path := req.URL.Path
-
-				// Skip API routes
-				if strings.HasPrefix(path, "/api/") || path == "/health" {
-					http.NotFound(w, req)
-					return
-				}
-
-				// Try to serve the file directly
-				filePath := filepath.Join(webDir, path)
-				if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
-					fileServer.ServeHTTP(w, req)
-					return
-				}
-
-				// SPA fallback: serve index.html for all other routes
-				indexPath := filepath.Join(webDir, "index.html")
-				if _, err := os.Stat(indexPath); err == nil {
-					http.ServeFile(w, req, indexPath)
-					return
-				}
-
-				// No frontend build found
-				http.NotFound(w, req)
-			})
-		} else {
-			slog.Warn("WebDir not found, skipping static file serving", "path", webDir)
-		}
+	webFS := configuredWebFS(config)
+	if webFS != nil {
+		r.Get("/*", staticFileHandler(webFS))
 	} else {
 		// API-only mode: show API info at root
 		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
@@ -209,6 +174,42 @@ func NewRouter(deps *RouterDeps, config *Config) chi.Router {
 	return r
 }
 
+func configuredWebFS(config *Config) fs.FS {
+	if config == nil {
+		return nil
+	}
+	if config.WebDir != "" {
+		if info, err := os.Stat(config.WebDir); err == nil && info.IsDir() {
+			return os.DirFS(config.WebDir)
+		}
+	}
+	return config.WebFS
+}
+
+func staticFileHandler(webFS fs.FS) http.HandlerFunc {
+	fileServer := http.FileServer(http.FS(webFS))
+	return func(w http.ResponseWriter, req *http.Request) {
+		name := strings.TrimPrefix(req.URL.Path, "/")
+		if name == "" {
+			name = dashboardIndex
+		}
+		if info, err := fs.Stat(webFS, name); err == nil && !info.IsDir() {
+			fileServer.ServeHTTP(w, req)
+			return
+		}
+		if _, err := fs.Stat(webFS, dashboardIndex); err != nil {
+			http.NotFound(w, req)
+			return
+		}
+
+		fallback := req.Clone(req.Context())
+		urlCopy := *req.URL
+		urlCopy.Path = "/"
+		fallback.URL = &urlCopy
+		fileServer.ServeHTTP(w, fallback)
+	}
+}
+
 // Config holds HTTP server configuration.
 type Config struct {
 	Host         string
@@ -217,6 +218,7 @@ type Config struct {
 	WriteTimeout time.Duration
 	IdleTimeout  time.Duration
 	WebDir       string // Path to SvelteKit build output (optional)
+	WebFS        fs.FS  // Embedded dashboard; WebDir overrides it when present.
 }
 
 // DefaultConfig returns the default server configuration.
@@ -271,7 +273,7 @@ func (s *Server) Start() error {
 		"health", fmt.Sprintf("http://%s/health", s.server.Addr),
 		"api", fmt.Sprintf("http://%s/api/v1", s.server.Addr),
 	)
-	if s.config.WebDir != "" {
+	if s.config.WebDir != "" || s.config.WebFS != nil {
 		slog.Info("dashboard enabled", "url", fmt.Sprintf("http://%s/", s.server.Addr))
 	}
 

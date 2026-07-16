@@ -61,6 +61,10 @@ build/
 dist/
 out/
 
+# The dashboard build is embedded in release binaries and stays source-controlled.
+!web/build/
+!web/build/**
+
 # Temporary files
 tmp/
 temp/
@@ -69,7 +73,6 @@ temp/
 # Node modules (for web)
 web/node_modules/
 web/.svelte-kit/
-web/build/
 
 # NPM/Yarn logs
 npm-debug.log*
