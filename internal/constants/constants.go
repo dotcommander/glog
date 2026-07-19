@@ -15,14 +15,13 @@ const (
 
 // HTTP timeouts
 const (
-	ReadTimeout      = 30 * time.Second
-	WriteTimeout     = 30 * time.Second
-	IdleTimeout      = 120 * time.Second
-	RequestTimeout   = 60 * time.Second
-	ShutdownTimeout  = 30 * time.Second
-	SSEKeepAlive     = 30 * time.Second
-	SSEClientTimeout = 100 * time.Millisecond
-	SSEChannelSize   = 10
+	ReadTimeout     = 30 * time.Second
+	WriteTimeout    = 30 * time.Second
+	IdleTimeout     = 120 * time.Second
+	RequestTimeout  = 60 * time.Second
+	ShutdownTimeout = 30 * time.Second
+	SSEKeepAlive    = 30 * time.Second
+	SSEChannelSize  = 10
 )
 
 // Database constants

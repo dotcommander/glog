@@ -8,9 +8,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"time"
-
-	"github.com/dotcommander/glog/internal/constants"
 )
 
 // Event represents a Server-Sent Event.
@@ -20,16 +17,50 @@ type Event struct {
 	ID   string      `json:"id,omitempty"` // Optional event ID
 }
 
+type clientState struct {
+	mu     sync.RWMutex
+	ch     chan<- Event
+	closed bool
+}
+
+func (c *clientState) trySend(event Event) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.closed {
+		return true
+	}
+	select {
+	case c.ch <- event:
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *clientState) close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
+	close(c.ch)
+	c.closed = true
+}
+
 // Hub manages SSE client connections.
 type Hub struct {
-	mu      sync.RWMutex
-	clients map[chan<- Event]struct{}
+	mu              sync.RWMutex
+	clients         map[chan<- Event]*clientState
+	warnSlowClients func(eventType string, dropped int)
 }
 
 // NewHub creates a new Hub.
 func NewHub() *Hub {
 	return &Hub{
-		clients: make(map[chan<- Event]struct{}),
+		clients: make(map[chan<- Event]*clientState),
+		warnSlowClients: func(eventType string, dropped int) {
+			slog.Warn("SSE clients slow, skipping event", "event_type", eventType, "dropped_clients", dropped)
+		},
 	}
 }
 
@@ -37,44 +68,43 @@ func NewHub() *Hub {
 func (h *Hub) AddClient(client chan<- Event) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.clients[client] = struct{}{}
+	if _, exists := h.clients[client]; exists {
+		return
+	}
+	h.clients[client] = &clientState{ch: client}
 }
 
 // RemoveClient removes a client from the hub.
 func (h *Hub) RemoveClient(client chan<- Event) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	if _, ok := h.clients[client]; !ok {
+	state, ok := h.clients[client]
+	if !ok {
+		h.mu.Unlock()
 		return
 	}
 	delete(h.clients, client)
-	close(client)
+	h.mu.Unlock()
+	state.close()
 }
 
-// Broadcast sends an event to all connected clients.
+// Broadcast immediately offers an event to every connected client. Delivery is
+// best effort: clients whose channel is not ready drop the event.
 func (h *Hub) Broadcast(event Event) {
 	h.mu.RLock()
-	defer h.mu.RUnlock()
+	clients := make([]*clientState, 0, len(h.clients))
+	for _, client := range h.clients {
+		clients = append(clients, client)
+	}
+	h.mu.RUnlock()
 
-	timer := time.NewTimer(constants.SSEClientTimeout)
-	defer timer.Stop()
-
-	for client := range h.clients {
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
+	dropped := 0
+	for _, client := range clients {
+		if !client.trySend(event) {
+			dropped++
 		}
-		timer.Reset(constants.SSEClientTimeout)
-
-		select {
-		case client <- event:
-			// Successfully sent
-		case <-timer.C:
-			// Client is slow, skip
-			slog.Warn("SSE client slow, skipping event", "event_type", event.Type)
-		}
+	}
+	if dropped > 0 {
+		h.warnSlowClients(event.Type, dropped)
 	}
 }
 
@@ -88,12 +118,16 @@ func (h *Hub) ClientCount() int {
 // Close disconnects all clients and closes the hub.
 func (h *Hub) Close() {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	for client := range h.clients {
-		close(client)
+	clients := make([]*clientState, 0, len(h.clients))
+	for _, client := range h.clients {
+		clients = append(clients, client)
 	}
-	h.clients = make(map[chan<- Event]struct{})
+	h.clients = make(map[chan<- Event]*clientState)
+	h.mu.Unlock()
+
+	for _, client := range clients {
+		client.close()
+	}
 }
 
 // WriteEvent writes a Server-Sent Event to an http.ResponseWriter.
