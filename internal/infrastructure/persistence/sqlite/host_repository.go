@@ -250,26 +250,6 @@ func (r *HostRepository) CountOnline() (int64, error) {
 	return count, nil
 }
 
-// IncrementLogCounters atomically increments log_count and optionally error_count for a host.
-func (r *HostRepository) IncrementLogCounters(hostID int64, totalNew int64, errorNew int64) error {
-	query := `
-		UPDATE hosts SET
-			log_count = log_count + ?,
-			error_count = error_count + ?,
-			error_rate = CASE
-				WHEN (log_count + ?) > 0
-				THEN CAST((error_count + ?) AS REAL) / CAST((log_count + ?) AS REAL)
-				ELSE 0
-			END
-		WHERE id = ?
-	`
-	_, err := r.db.Conn().Exec(query, totalNew, errorNew, totalNew, errorNew, totalNew, hostID)
-	if err != nil {
-		return fmt.Errorf("failed to increment log counters: %w", err)
-	}
-	return nil
-}
-
 // Delete removes a host by ID.
 func (r *HostRepository) Delete(id int64) error {
 	result, err := r.db.Conn().Exec("DELETE FROM hosts WHERE id = ?", id)

@@ -45,9 +45,6 @@ type HostRepository interface {
 
 	// Delete removes a host by ID.
 	Delete(id int64) error
-
-	// IncrementLogCounters atomically increments log_count and optionally error_count for a host.
-	IncrementLogCounters(hostID int64, totalNew int64, errorNew int64) error
 }
 
 // LogFilters represents query filters for logs.

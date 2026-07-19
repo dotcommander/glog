@@ -119,9 +119,9 @@ type Host struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	LastSeen   time.Time  `json:"last_seen"`
 	LastLogID  *int64     `json:"last_log_id,omitempty"` // Most recent log ID
-	LogCount   int64      `json:"log_count"`             // Total logs from this host
-	ErrorCount int64      `json:"error_count"`           // Error logs in last 24h
-	ErrorRate  float64    `json:"error_rate"`            // Error rate (0-1)
+	LogCount   int64      `json:"log_count"`             // Lifetime accepted logs from this host
+	ErrorCount int64      `json:"error_count"`           // Lifetime accepted error and fatal logs
+	ErrorRate  float64    `json:"error_rate"`            // Lifetime accepted error rate (0-1)
 
 	// Optional metadata
 	Description string  `json:"description,omitempty"`

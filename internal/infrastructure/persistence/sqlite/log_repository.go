@@ -61,10 +61,6 @@ func logInsertArgs(log *entities.Log) []any {
 // LogFilters is an alias for ports.LogFilters for backward compatibility.
 type LogFilters = ports.LogFilters
 
-type sqlExecer interface {
-	Exec(query string, args ...any) (sql.Result, error)
-}
-
 func updateSummaryBuckets(exec sqlExecer, logs []*entities.Log) error {
 	for _, log := range logs {
 		bucketStart := log.Timestamp.UTC().Truncate(time.Hour)
@@ -159,6 +155,9 @@ func (r *LogRepository) Create(log *entities.Log) error {
 	if err := updateSummaryBuckets(tx, []*entities.Log{log}); err != nil {
 		return err
 	}
+	if err := updateHostLogCounters(tx, []*entities.Log{log}); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
@@ -208,6 +207,9 @@ func (r *LogRepository) BulkCreate(logs []*entities.Log) ([]int64, error) {
 	}
 
 	if err := updateSummaryBuckets(tx, logs); err != nil {
+		return nil, err
+	}
+	if err := updateHostLogCounters(tx, logs); err != nil {
 		return nil, err
 	}
 

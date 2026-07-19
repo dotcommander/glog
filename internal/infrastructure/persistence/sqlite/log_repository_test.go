@@ -83,6 +83,14 @@ func TestLogRepositoryCreateUpdatesHourlyBuckets(t *testing.T) {
 	if fpBuckets[0].Fingerprint != log.Fingerprint || fpBuckets[0].Count != 1 {
 		t.Fatalf("unexpected fingerprint bucket: %+v", fpBuckets[0])
 	}
+
+	updatedHost, err := hostRepo.FindByID(host.ID)
+	if err != nil {
+		t.Fatalf("FindByID failed: %v", err)
+	}
+	if updatedHost.LogCount != 1 || updatedHost.ErrorCount != 1 || updatedHost.ErrorRate != 1 {
+		t.Fatalf("unexpected host counters: logs=%d errors=%d rate=%v", updatedHost.LogCount, updatedHost.ErrorCount, updatedHost.ErrorRate)
+	}
 }
 
 func TestLogRepositoryBulkCreateAggregatesHourlyBuckets(t *testing.T) {
@@ -98,6 +106,7 @@ func TestLogRepositoryBulkCreateAggregatesHourlyBuckets(t *testing.T) {
 		{HostID: host.ID, Level: entities.LogLevelInfo, Message: "ok one", Fields: entities.JSONMap{}, Timestamp: base, CreatedAt: base},
 		{HostID: host.ID, Level: entities.LogLevelInfo, Message: "ok two", Fields: entities.JSONMap{}, Timestamp: base.Add(10 * time.Minute), CreatedAt: base},
 		{HostID: host.ID, Level: entities.LogLevelWarn, Message: "slow", Fields: entities.JSONMap{}, Timestamp: base.Add(20 * time.Minute), CreatedAt: base},
+		{HostID: host.ID, Level: entities.LogLevelFatal, Message: "failed", Fields: entities.JSONMap{}, Timestamp: base.Add(30 * time.Minute), CreatedAt: base},
 	}
 	if _, err := logRepo.BulkCreate(logs); err != nil {
 		t.Fatalf("BulkCreate failed: %v", err)
@@ -107,16 +116,96 @@ func TestLogRepositoryBulkCreateAggregatesHourlyBuckets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindLogBuckets failed: %v", err)
 	}
-	if len(buckets) != 2 {
-		t.Fatalf("bucket count mismatch: got %d want 2", len(buckets))
+	if len(buckets) != 3 {
+		t.Fatalf("bucket count mismatch: got %d want 3", len(buckets))
 	}
 
 	counts := map[string]int64{}
 	for _, bucket := range buckets {
 		counts[bucket.Level] = bucket.Count
 	}
-	if counts["info"] != 2 || counts["warn"] != 1 {
+	if counts["info"] != 2 || counts["warn"] != 1 || counts["fatal"] != 1 {
 		t.Fatalf("unexpected counts: %+v", counts)
+	}
+
+	updatedHost, err := hostRepo.FindByID(host.ID)
+	if err != nil {
+		t.Fatalf("FindByID failed: %v", err)
+	}
+	if updatedHost.LogCount != 4 || updatedHost.ErrorCount != 1 || updatedHost.ErrorRate != 0.25 {
+		t.Fatalf("unexpected host counters: logs=%d errors=%d rate=%v", updatedHost.LogCount, updatedHost.ErrorCount, updatedHost.ErrorRate)
+	}
+}
+
+func TestLogRepositoryRollsBackWhenCounterUpdateFails(t *testing.T) {
+	t.Parallel()
+
+	ts := time.Date(2026, 5, 15, 12, 34, 0, 0, time.UTC)
+	tests := []struct {
+		name  string
+		write func(*LogRepository, int64) error
+	}{
+		{
+			name: "create",
+			write: func(repo *LogRepository, hostID int64) error {
+				return repo.Create(&entities.Log{
+					HostID: hostID, Level: entities.LogLevelError, Message: "failed",
+					Fields: entities.JSONMap{}, Timestamp: ts, CreatedAt: ts, Fingerprint: "failure",
+				})
+			},
+		},
+		{
+			name: "bulk create",
+			write: func(repo *LogRepository, hostID int64) error {
+				_, err := repo.BulkCreate([]*entities.Log{
+					{HostID: hostID, Level: entities.LogLevelInfo, Message: "first", Fields: entities.JSONMap{}, Timestamp: ts, CreatedAt: ts},
+					{HostID: hostID, Level: entities.LogLevelError, Message: "second", Fields: entities.JSONMap{}, Timestamp: ts, CreatedAt: ts, Fingerprint: "failure"},
+				})
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			db := newTestDB(t)
+			hostRepo := NewHostRepository(db)
+			logRepo := NewLogRepository(db)
+			host := createTestHost(t, hostRepo, "rollback-"+tt.name)
+			if _, err := db.Conn().Exec(`
+				CREATE TRIGGER fail_host_counter_update
+				BEFORE UPDATE OF log_count ON hosts
+				BEGIN
+					SELECT RAISE(FAIL, 'counter update failed');
+				END
+			`); err != nil {
+				t.Fatalf("create trigger failed: %v", err)
+			}
+
+			if err := tt.write(logRepo, host.ID); err == nil {
+				t.Fatal("log write succeeded; want counter update failure")
+			}
+
+			for _, table := range []string{"logs", "log_buckets", "fingerprint_buckets"} {
+				var count int
+				if err := db.Conn().QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil {
+					t.Fatalf("count %s failed: %v", table, err)
+				}
+				if count != 0 {
+					t.Fatalf("%s count = %d; want 0 after rollback", table, count)
+				}
+			}
+
+			updatedHost, err := hostRepo.FindByID(host.ID)
+			if err != nil {
+				t.Fatalf("FindByID failed: %v", err)
+			}
+			if updatedHost.LogCount != 0 || updatedHost.ErrorCount != 0 || updatedHost.ErrorRate != 0 {
+				t.Fatalf("host counters changed after rollback: logs=%d errors=%d rate=%v", updatedHost.LogCount, updatedHost.ErrorCount, updatedHost.ErrorRate)
+			}
+		})
 	}
 }
 
@@ -152,32 +241,6 @@ func TestLogRepositoryFindGroupedScansAggregateTimestamps(t *testing.T) {
 	}
 	if !group.FirstSeen.Equal(firstSeen) || !group.LastSeen.Equal(lastSeen) {
 		t.Fatalf("unexpected time range: first=%s want=%s last=%s want=%s", group.FirstSeen, firstSeen, group.LastSeen, lastSeen)
-	}
-}
-
-func TestHostRepositoryIncrementLogCountersStoresRatio(t *testing.T) {
-	t.Parallel()
-
-	db := newTestDB(t)
-	hostRepo := NewHostRepository(db)
-	host := createTestHost(t, hostRepo, "api")
-
-	if err := hostRepo.IncrementLogCounters(host.ID, 1, 0); err != nil {
-		t.Fatalf("IncrementLogCounters info failed: %v", err)
-	}
-	if err := hostRepo.IncrementLogCounters(host.ID, 1, 1); err != nil {
-		t.Fatalf("IncrementLogCounters error failed: %v", err)
-	}
-
-	updated, err := hostRepo.FindByID(host.ID)
-	if err != nil {
-		t.Fatalf("FindByID failed: %v", err)
-	}
-	if updated.LogCount != 2 || updated.ErrorCount != 1 {
-		t.Fatalf("unexpected counters: logs=%d errors=%d", updated.LogCount, updated.ErrorCount)
-	}
-	if updated.ErrorRate != 0.5 {
-		t.Fatalf("error rate = %v; want 0.5", updated.ErrorRate)
 	}
 }
 

@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -110,14 +109,6 @@ func CreateLogHandler(h *Handlers) http.HandlerFunc {
 			return
 		}
 
-		var errorDelta int64
-		if isErrorLevel(log.Level) {
-			errorDelta = 1
-		}
-		if err := h.hostRepo.IncrementLogCounters(host.ID, 1, errorDelta); err != nil {
-			slog.Warn("failed to update host counters", "error", err)
-		}
-
 		// UpdateLastSeen is handled by auth middleware.
 		h.BroadcastLogCreated(logToResponse(log))
 		if h.recorder != nil {
@@ -172,18 +163,14 @@ func CreateBulkLogsHandler(h *Handlers) http.HandlerFunc {
 			return
 		}
 
-		var errorCount int64
-		for _, l := range logs {
-			if isErrorLevel(l.Level) {
-				errorCount++
-			}
-		}
-		if err := h.hostRepo.IncrementLogCounters(host.ID, int64(len(logs)), errorCount); err != nil {
-			slog.Warn("failed to update host counters", "error", err)
-		}
-
 		// UpdateLastSeen is handled by auth middleware.
 		if h.recorder != nil {
+			var errorCount int64
+			for _, l := range logs {
+				if isErrorLevel(l.Level) {
+					errorCount++
+				}
+			}
 			h.recorder.Record("log.bulk_created", map[string]any{
 				"host_id":    host.ID,
 				"batch_size": len(logs),

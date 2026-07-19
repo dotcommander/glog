@@ -54,13 +54,15 @@ func TestGroupedLogsRouteReturnsAggregateTimes(t *testing.T) {
 func TestHostsRouteReturnsErrorRatePercent(t *testing.T) {
 	t.Parallel()
 
-	router, hostRepo, _ := newLogRouteTestDeps(t)
+	router, hostRepo, logRepo := newLogRouteTestDeps(t)
 	host := createHTTPTestHost(t, hostRepo, "api")
-	if err := hostRepo.IncrementLogCounters(host.ID, 1, 0); err != nil {
-		t.Fatalf("IncrementLogCounters() info error = %v", err)
+	now := time.Now()
+	logs := []*entities.Log{
+		{HostID: host.ID, Level: entities.LogLevelInfo, Message: "ok", Fields: entities.JSONMap{}, Timestamp: now, CreatedAt: now},
+		{HostID: host.ID, Level: entities.LogLevelError, Message: "failed", Fields: entities.JSONMap{}, Timestamp: now, CreatedAt: now},
 	}
-	if err := hostRepo.IncrementLogCounters(host.ID, 1, 1); err != nil {
-		t.Fatalf("IncrementLogCounters() error error = %v", err)
+	if _, err := logRepo.BulkCreate(logs); err != nil {
+		t.Fatalf("BulkCreate() error = %v", err)
 	}
 
 	resp := requestJSON(t, router, stdhttp.MethodGet, "/api/v1/hosts", nil, stdhttp.StatusOK)

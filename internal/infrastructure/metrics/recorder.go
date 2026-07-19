@@ -12,9 +12,8 @@ import (
 
 // Recorder writes low-cardinality internal server metrics through normal repositories.
 type Recorder struct {
-	hostRepo ports.HostRepository
-	logRepo  ports.LogRepository
-	hostID   int64
+	logRepo ports.LogRepository
+	hostID  int64
 }
 
 // NewRecorder creates or loads the reserved internal host.
@@ -34,7 +33,7 @@ func NewRecorder(hostRepo ports.HostRepository, logRepo ports.LogRepository) (*R
 			return nil, err
 		}
 	}
-	return &Recorder{hostRepo: hostRepo, logRepo: logRepo, hostID: host.ID}, nil
+	return &Recorder{logRepo: logRepo, hostID: host.ID}, nil
 }
 
 // Record writes one internal telemetry log. Errors are logged but not returned.
@@ -57,10 +56,6 @@ func (r *Recorder) Record(event string, fields map[string]any) {
 	log.Fields["event"] = event
 	if err := r.logRepo.Create(log); err != nil {
 		slog.Debug("failed to record internal metric", "event", event, "error", err)
-		return
-	}
-	if err := r.hostRepo.IncrementLogCounters(r.hostID, 1, 0); err != nil {
-		slog.Debug("failed to update internal metric counters", "error", err)
 	}
 }
 
