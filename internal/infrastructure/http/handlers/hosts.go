@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -93,10 +92,8 @@ type HostStats struct {
 // RegisterHostHandler handles POST /api/v1/hosts - Register a new host.
 func RegisterHostHandler(h *Handlers) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Parse request body
 		var req RegisterHostRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		if !decodeJSONRequest(w, r, &req) {
 			return
 		}
 

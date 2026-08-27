@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dotcommander/glog/internal/constants"
 	"github.com/dotcommander/glog/internal/domain/entities"
 	"github.com/dotcommander/glog/internal/infrastructure/http/handlers"
 	"github.com/dotcommander/glog/internal/infrastructure/persistence/sqlite"
@@ -74,6 +75,64 @@ func TestHostsRouteReturnsErrorRatePercent(t *testing.T) {
 	if got != 50 {
 		t.Fatalf("error_rate = %v; want 50", got)
 	}
+}
+
+func TestRegisterHostRejectsUnknownJSONFields(t *testing.T) {
+	t.Parallel()
+
+	router, hostRepo, _ := newLogRouteTestDeps(t)
+	req := httptest.NewRequest(stdhttp.MethodPost, "/api/v1/hosts", bytes.NewBufferString(
+		`{"name":"api","unexpected":true}`,
+	))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != stdhttp.StatusBadRequest {
+		t.Fatalf("POST /api/v1/hosts status = %d; want %d; body = %q", rec.Code, stdhttp.StatusBadRequest, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("unknown field")) {
+		t.Fatalf("body = %q; want unknown field error", rec.Body.String())
+	}
+	assertNoRegisteredHosts(t, hostRepo)
+}
+
+func TestRegisterHostRejectsOversizedRequestBody(t *testing.T) {
+	t.Parallel()
+
+	router, hostRepo, _ := newLogRouteTestDeps(t)
+	body := `{"name":"` + strings.Repeat("x", constants.MaxRequestBodyBytes) + `"}`
+	req := httptest.NewRequest(stdhttp.MethodPost, "/api/v1/hosts", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != stdhttp.StatusBadRequest {
+		t.Fatalf("POST /api/v1/hosts status = %d; want %d; body = %q", rec.Code, stdhttp.StatusBadRequest, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("request body too large")) {
+		t.Fatalf("body = %q; want request body too large error", rec.Body.String())
+	}
+	assertNoRegisteredHosts(t, hostRepo)
+}
+
+func TestRegisterHostRejectsOversizedTrailingData(t *testing.T) {
+	t.Parallel()
+
+	router, hostRepo, _ := newLogRouteTestDeps(t)
+	body := `{"name":"api"}` + strings.Repeat(" ", constants.MaxRequestBodyBytes)
+	req := httptest.NewRequest(stdhttp.MethodPost, "/api/v1/hosts", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != stdhttp.StatusBadRequest {
+		t.Fatalf("POST /api/v1/hosts status = %d; want %d; body = %q", rec.Code, stdhttp.StatusBadRequest, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("request body too large")) {
+		t.Fatalf("body = %q; want request body too large error", rec.Body.String())
+	}
+	assertNoRegisteredHosts(t, hostRepo)
 }
 
 func TestLogRoutesRejectUnknownJSONFields(t *testing.T) {
@@ -181,4 +240,15 @@ func createHTTPTestHost(t *testing.T, repo *sqlite.HostRepository, name string) 
 		t.Fatalf("Create() error = %v", err)
 	}
 	return host
+}
+
+func assertNoRegisteredHosts(t *testing.T, repo *sqlite.HostRepository) {
+	t.Helper()
+	hosts, err := repo.List(false)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(hosts) != 0 {
+		t.Fatalf("registered hosts = %d; want 0", len(hosts))
+	}
 }

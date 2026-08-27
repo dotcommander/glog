@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -24,6 +25,14 @@ func decodeJSONRequest(w http.ResponseWriter, r *http.Request, dst any) bool {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(dst); err != nil {
 		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			http.Error(w, "Invalid JSON: request body must contain exactly one JSON value", http.StatusBadRequest)
+		} else {
+			http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		}
 		return false
 	}
 	return true
