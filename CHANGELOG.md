@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.3 (2026-08-29)
+
+### Fixes
+
+- Validate host registration bodies consistently.
+
 ## v0.4.2 (2026-07-16)
 
 ### Fixes
