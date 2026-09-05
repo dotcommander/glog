@@ -31,12 +31,12 @@ type InboxItemRequest struct {
 
 func ListInboxItemsHandler(h *Handlers) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if h.inboxRepo == nil {
-			http.Error(w, "Inbox is not configured", http.StatusServiceUnavailable)
+		repo, ok := h.requireInboxRepo(w)
+		if !ok {
 			return
 		}
 		filters := parseInboxFilters(r)
-		items, total, err := h.inboxRepo.List(filters)
+		items, total, err := repo.List(filters)
 		if err != nil {
 			http.Error(w, "Failed to fetch inbox items: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -55,15 +55,15 @@ func ListInboxItemsHandler(h *Handlers) http.HandlerFunc {
 
 func GetInboxItemHandler(h *Handlers) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if h.inboxRepo == nil {
-			http.Error(w, "Inbox is not configured", http.StatusServiceUnavailable)
+		repo, ok := h.requireInboxRepo(w)
+		if !ok {
 			return
 		}
 		id, ok := parseInboxID(w, r)
 		if !ok {
 			return
 		}
-		item, err := h.inboxRepo.FindByID(id)
+		item, err := repo.FindByID(id)
 		if err != nil {
 			if errors.Is(err, ports.ErrNotFound) {
 				http.Error(w, "Inbox item not found", http.StatusNotFound)
@@ -78,8 +78,8 @@ func GetInboxItemHandler(h *Handlers) http.HandlerFunc {
 
 func CreateInboxItemHandler(h *Handlers) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if h.inboxRepo == nil {
-			http.Error(w, "Inbox is not configured", http.StatusServiceUnavailable)
+		repo, ok := h.requireInboxRepo(w)
+		if !ok {
 			return
 		}
 		req, ok := decodeInboxItemRequest(w, r)
@@ -91,7 +91,7 @@ func CreateInboxItemHandler(h *Handlers) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if err := h.inboxRepo.Create(item); err != nil {
+		if err := repo.Create(item); err != nil {
 			http.Error(w, "Failed to create inbox item: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -101,15 +101,15 @@ func CreateInboxItemHandler(h *Handlers) http.HandlerFunc {
 
 func UpdateInboxItemHandler(h *Handlers) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if h.inboxRepo == nil {
-			http.Error(w, "Inbox is not configured", http.StatusServiceUnavailable)
+		repo, ok := h.requireInboxRepo(w)
+		if !ok {
 			return
 		}
 		id, ok := parseInboxID(w, r)
 		if !ok {
 			return
 		}
-		existing, err := h.inboxRepo.FindByID(id)
+		existing, err := repo.FindByID(id)
 		if err != nil {
 			if errors.Is(err, ports.ErrNotFound) {
 				http.Error(w, "Inbox item not found", http.StatusNotFound)
@@ -127,7 +127,7 @@ func UpdateInboxItemHandler(h *Handlers) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if err := h.inboxRepo.Update(item); err != nil {
+		if err := repo.Update(item); err != nil {
 			http.Error(w, "Failed to update inbox item: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -137,15 +137,15 @@ func UpdateInboxItemHandler(h *Handlers) http.HandlerFunc {
 
 func CompleteInboxItemHandler(h *Handlers) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if h.inboxRepo == nil {
-			http.Error(w, "Inbox is not configured", http.StatusServiceUnavailable)
+		repo, ok := h.requireInboxRepo(w)
+		if !ok {
 			return
 		}
 		id, ok := parseInboxID(w, r)
 		if !ok {
 			return
 		}
-		item, err := h.inboxRepo.FindByID(id)
+		item, err := repo.FindByID(id)
 		if err != nil {
 			if errors.Is(err, ports.ErrNotFound) {
 				http.Error(w, "Inbox item not found", http.StatusNotFound)
@@ -155,7 +155,7 @@ func CompleteInboxItemHandler(h *Handlers) http.HandlerFunc {
 			return
 		}
 		item.Status = entities.InboxStatusDone
-		if err := h.inboxRepo.Update(item); err != nil {
+		if err := repo.Update(item); err != nil {
 			http.Error(w, "Failed to complete inbox item: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -165,15 +165,15 @@ func CompleteInboxItemHandler(h *Handlers) http.HandlerFunc {
 
 func DeleteInboxItemHandler(h *Handlers) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if h.inboxRepo == nil {
-			http.Error(w, "Inbox is not configured", http.StatusServiceUnavailable)
+		repo, ok := h.requireInboxRepo(w)
+		if !ok {
 			return
 		}
 		id, ok := parseInboxID(w, r)
 		if !ok {
 			return
 		}
-		if err := h.inboxRepo.Delete(id); err != nil {
+		if err := repo.Delete(id); err != nil {
 			if errors.Is(err, ports.ErrNotFound) {
 				http.Error(w, "Inbox item not found", http.StatusNotFound)
 				return
@@ -183,6 +183,14 @@ func DeleteInboxItemHandler(h *Handlers) http.HandlerFunc {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+func (h *Handlers) requireInboxRepo(w http.ResponseWriter) (ports.InboxRepository, bool) {
+	if h.inboxRepo == nil {
+		http.Error(w, "Inbox is not configured", http.StatusServiceUnavailable)
+		return nil, false
+	}
+	return h.inboxRepo, true
 }
 
 func parseInboxFilters(r *http.Request) ports.InboxFilters {

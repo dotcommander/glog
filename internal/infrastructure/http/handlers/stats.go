@@ -12,37 +12,27 @@ import (
 
 // LogBucketsHandler handles GET /api/v1/stats/logs.
 func LogBucketsHandler(h *Handlers) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		filters, ok := parseStatsFilters(w, r)
-		if !ok {
-			return
-		}
-		buckets, err := h.logRepo.FindLogBuckets(filters)
-		if err != nil {
-			http.Error(w, "Failed to fetch log stats: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if buckets == nil {
-			buckets = []ports.LogBucket{}
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"buckets": buckets, "total": len(buckets)})
-	}
+	return statsBucketsHandler("Failed to fetch log stats: ", h.logRepo.FindLogBuckets)
 }
 
 // FingerprintBucketsHandler handles GET /api/v1/stats/fingerprints.
 func FingerprintBucketsHandler(h *Handlers) http.HandlerFunc {
+	return statsBucketsHandler("Failed to fetch fingerprint stats: ", h.logRepo.FindFingerprintBuckets)
+}
+
+func statsBucketsHandler[T any](errorPrefix string, query func(ports.LogFilters) ([]T, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		filters, ok := parseStatsFilters(w, r)
 		if !ok {
 			return
 		}
-		buckets, err := h.logRepo.FindFingerprintBuckets(filters)
+		buckets, err := query(filters)
 		if err != nil {
-			http.Error(w, "Failed to fetch fingerprint stats: "+err.Error(), http.StatusInternalServerError)
+			http.Error(w, errorPrefix+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		if buckets == nil {
-			buckets = []ports.FingerprintBucket{}
+			buckets = []T{}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"buckets": buckets, "total": len(buckets)})
 	}

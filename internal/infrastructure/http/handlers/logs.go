@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/dotcommander/glog/internal/constants"
 	"github.com/dotcommander/glog/internal/domain/entities"
 	"github.com/dotcommander/glog/internal/domain/ports"
 	"github.com/go-chi/chi/v5"
@@ -27,13 +26,8 @@ type LogResponse struct {
 // ListLogsHandler handles GET /api/v1/logs - Query logs.
 func ListLogsHandler(h *Handlers) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		filters := parseLogFilters(r)
-
-		filters.Limit, filters.Offset = constants.NormalizePagination(filters.Limit, filters.Offset)
-
-		// Validate level if provided
-		if filters.Level != "" && !constants.IsValidLogLevel(filters.Level) {
-			http.Error(w, "Invalid level. Must be one of: trace, debug, info, warn, error, fatal", http.StatusBadRequest)
+		filters, ok := parseValidatedLogFilters(w, r)
+		if !ok {
 			return
 		}
 
@@ -113,11 +107,8 @@ func logToResponse(log *entities.Log) LogResponse {
 // ListGroupedLogsHandler handles GET /api/v1/logs/groups - Query grouped logs by fingerprint.
 func ListGroupedLogsHandler(h *Handlers) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		filters := parseLogFilters(r)
-		filters.Limit, filters.Offset = constants.NormalizePagination(filters.Limit, filters.Offset)
-
-		if filters.Level != "" && !constants.IsValidLogLevel(filters.Level) {
-			http.Error(w, "Invalid level. Must be one of: trace, debug, info, warn, error, fatal", http.StatusBadRequest)
+		filters, ok := parseValidatedLogFilters(w, r)
+		if !ok {
 			return
 		}
 

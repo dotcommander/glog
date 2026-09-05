@@ -4,18 +4,20 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/dotcommander/glog/internal/constants"
 	"github.com/dotcommander/glog/internal/domain/ports"
 )
 
+const invalidLogLevelError = "Invalid level. Must be one of: trace, debug, info, warn, error, fatal"
+
 // parseLogFilters extracts log query filters from query parameters.
-// Callers are responsible for normalizing limit/offset via constants.NormalizePagination.
 func parseLogFilters(r *http.Request) ports.LogFilters {
 	q := r.URL.Query()
 	filters := ports.LogFilters{
-		Level:   q.Get("level"),
+		Level:    q.Get("level"),
 		FromDate: q.Get("from"),
-		ToDate:  q.Get("to"),
-		OrderBy: q.Get("order_by"),
+		ToDate:   q.Get("to"),
+		OrderBy:  q.Get("order_by"),
 	}
 
 	if limit := q.Get("limit"); limit != "" {
@@ -43,4 +45,17 @@ func parseLogFilters(r *http.Request) ports.LogFilters {
 	}
 
 	return filters
+}
+
+// parseValidatedLogFilters extracts, normalizes, and validates list-log filters.
+func parseValidatedLogFilters(w http.ResponseWriter, r *http.Request) (ports.LogFilters, bool) {
+	filters := parseLogFilters(r)
+	filters.Limit, filters.Offset = constants.NormalizePagination(filters.Limit, filters.Offset)
+
+	if filters.Level != "" && !constants.IsValidLogLevel(filters.Level) {
+		http.Error(w, invalidLogLevelError, http.StatusBadRequest)
+		return ports.LogFilters{}, false
+	}
+
+	return filters, true
 }

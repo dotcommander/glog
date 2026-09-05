@@ -3,6 +3,8 @@ package http
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	stdhttp "net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/dotcommander/glog/internal/constants"
 	"github.com/dotcommander/glog/internal/domain/entities"
+	"github.com/dotcommander/glog/internal/domain/ports"
 	"github.com/dotcommander/glog/internal/infrastructure/http/handlers"
 	"github.com/dotcommander/glog/internal/infrastructure/persistence/sqlite"
 	"github.com/dotcommander/glog/internal/infrastructure/sse"
@@ -52,6 +55,48 @@ func TestGroupedLogsRouteReturnsAggregateTimes(t *testing.T) {
 	}
 }
 
+func TestLogListRoutesRejectInvalidLevelFilter(t *testing.T) {
+	t.Parallel()
+
+	router, _, _ := newLogRouteTestDeps(t)
+	for _, path := range []string{
+		"/api/v1/logs?level=nope",
+		"/api/v1/logs/groups?level=nope",
+	} {
+		rec := requestStatus(t, router, stdhttp.MethodGet, path, nil, stdhttp.StatusBadRequest)
+		if !strings.Contains(rec.Body.String(), "Invalid level. Must be one of: trace, debug, info, warn, error, fatal") {
+			t.Fatalf("GET %s response = %q; want invalid level error", path, rec.Body.String())
+		}
+	}
+}
+
+func TestLogListRoutesNormalizePagination(t *testing.T) {
+	t.Parallel()
+
+	router, _, _ := newLogRouteTestDeps(t)
+	for _, route := range []string{"/api/v1/logs", "/api/v1/logs/groups"} {
+		for _, tt := range []struct {
+			name       string
+			query      string
+			wantLimit  int
+			wantOffset int
+		}{
+			{name: "defaults", wantLimit: constants.DefaultLimit, wantOffset: 0},
+			{name: "caps limit", query: "?limit=1001&offset=7", wantLimit: constants.MaxLimit, wantOffset: 7},
+		} {
+			t.Run(route+"/"+tt.name, func(t *testing.T) {
+				response := requestJSON(t, router, stdhttp.MethodGet, route+tt.query, nil, stdhttp.StatusOK)
+				if got := int(response["limit"].(float64)); got != tt.wantLimit {
+					t.Fatalf("GET %s limit = %d; want %d", route+tt.query, got, tt.wantLimit)
+				}
+				if got := int(response["offset"].(float64)); got != tt.wantOffset {
+					t.Fatalf("GET %s offset = %d; want %d", route+tt.query, got, tt.wantOffset)
+				}
+			})
+		}
+	}
+}
+
 func TestHostsRouteReturnsErrorRatePercent(t *testing.T) {
 	t.Parallel()
 
@@ -74,6 +119,63 @@ func TestHostsRouteReturnsErrorRatePercent(t *testing.T) {
 	got := hosts[0].(map[string]any)["error_rate"].(float64)
 	if got != 50 {
 		t.Fatalf("error_rate = %v; want 50", got)
+	}
+}
+
+func TestHostDetailRoutesReturnHostAndStats(t *testing.T) {
+	t.Parallel()
+
+	router, hostRepo, logRepo := newLogRouteTestDeps(t)
+	host := createHTTPTestHost(t, hostRepo, "detail")
+	now := time.Now().UTC()
+	if err := logRepo.Create(&entities.Log{
+		HostID: host.ID, Level: entities.LogLevelError, Message: "failed",
+		Fields: entities.JSONMap{}, Timestamp: now, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	for _, tt := range []struct {
+		name  string
+		path  string
+		field string
+		want  any
+	}{
+		{name: "details", path: fmt.Sprintf("/api/v1/hosts/%d", host.ID), field: "id", want: float64(host.ID)},
+		{name: "stats", path: fmt.Sprintf("/api/v1/hosts/%d/stats", host.ID), field: "total_logs", want: float64(1)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			response := requestJSON(t, router, stdhttp.MethodGet, tt.path, nil, stdhttp.StatusOK)
+			if got := response[tt.field]; got != tt.want {
+				t.Fatalf("GET %s %s = %v; want %v", tt.path, tt.field, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHostDetailRoutesRejectMalformedAndMissingIDs(t *testing.T) {
+	t.Parallel()
+
+	router, _, _ := newLogRouteTestDeps(t)
+	for _, tt := range []struct {
+		name       string
+		path       string
+		wantStatus int
+		wantBody   string
+	}{
+		{name: "malformed details ID", path: "/api/v1/hosts/nope", wantStatus: stdhttp.StatusBadRequest, wantBody: "Invalid host ID"},
+		{name: "malformed stats ID", path: "/api/v1/hosts/nope/stats", wantStatus: stdhttp.StatusBadRequest, wantBody: "Invalid host ID"},
+		{name: "missing details ID", path: "/api/v1/hosts/999999", wantStatus: stdhttp.StatusNotFound, wantBody: "Host not found"},
+		{name: "missing stats ID", path: "/api/v1/hosts/999999/stats", wantStatus: stdhttp.StatusNotFound, wantBody: "Host not found"},
+		{name: "zero details ID", path: "/api/v1/hosts/0", wantStatus: stdhttp.StatusNotFound, wantBody: "Host not found"},
+		{name: "negative stats ID", path: "/api/v1/hosts/-1/stats", wantStatus: stdhttp.StatusNotFound, wantBody: "Host not found"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := requestStatus(t, router, stdhttp.MethodGet, tt.path, nil, tt.wantStatus)
+			if !strings.Contains(rec.Body.String(), tt.wantBody) {
+				t.Fatalf("GET %s body = %q; want %q", tt.path, rec.Body.String(), tt.wantBody)
+			}
+		})
 	}
 }
 
@@ -169,6 +271,106 @@ func TestExportRejectsInvalidLevelFilter(t *testing.T) {
 
 	if rec.Code != stdhttp.StatusBadRequest {
 		t.Fatalf("GET /api/v1/export/json status = %d; want %d; body = %q", rec.Code, stdhttp.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestStatsRoutesReturnEmptyBuckets(t *testing.T) {
+	t.Parallel()
+
+	router, _, _ := newLogRouteTestDeps(t)
+	for _, path := range []string{
+		"/api/v1/stats/logs",
+		"/api/v1/stats/fingerprints",
+	} {
+		response := requestJSON(t, router, stdhttp.MethodGet, path, nil, stdhttp.StatusOK)
+		buckets, ok := response["buckets"].([]any)
+		if !ok || len(buckets) != 0 {
+			t.Fatalf("GET %s buckets = %#v; want empty array", path, response["buckets"])
+		}
+		if total := int(response["total"].(float64)); total != 0 {
+			t.Fatalf("GET %s total = %d; want 0", path, total)
+		}
+	}
+}
+
+func TestStatsRoutesRejectInvalidFilters(t *testing.T) {
+	t.Parallel()
+
+	router, _, _ := newLogRouteTestDeps(t)
+	for _, path := range []string{
+		"/api/v1/stats/logs?level=nope",
+		"/api/v1/stats/fingerprints?level=nope",
+	} {
+		rec := requestStatus(t, router, stdhttp.MethodGet, path, nil, stdhttp.StatusBadRequest)
+		if !strings.Contains(rec.Body.String(), "Invalid level. Must be one of: trace, debug, info, warn, error, fatal") {
+			t.Fatalf("GET %s response = %q; want invalid level error", path, rec.Body.String())
+		}
+	}
+}
+
+func TestStatsRoutesReturnPopulatedBuckets(t *testing.T) {
+	t.Parallel()
+
+	router, hostRepo, logRepo := newLogRouteTestDeps(t)
+	host := createHTTPTestHost(t, hostRepo, "stats")
+	now := time.Now().UTC()
+	if err := logRepo.Create(&entities.Log{
+		HostID: host.ID, Level: entities.LogLevelError, Message: "failed",
+		Fields: entities.JSONMap{}, Timestamp: now, CreatedAt: now, Fingerprint: "failure",
+	}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	for _, path := range []string{
+		"/api/v1/stats/logs",
+		"/api/v1/stats/fingerprints",
+	} {
+		response := requestJSON(t, router, stdhttp.MethodGet, path, nil, stdhttp.StatusOK)
+		buckets, ok := response["buckets"].([]any)
+		if !ok || len(buckets) != 1 {
+			t.Fatalf("GET %s buckets = %#v; want one bucket", path, response["buckets"])
+		}
+		if total := int(response["total"].(float64)); total != 1 {
+			t.Fatalf("GET %s total = %d; want 1", path, total)
+		}
+	}
+}
+
+type failingStatsLogRepository struct {
+	ports.LogRepository
+	err error
+}
+
+func (r failingStatsLogRepository) FindLogBuckets(ports.LogFilters) ([]ports.LogBucket, error) {
+	return nil, r.err
+}
+
+func (r failingStatsLogRepository) FindFingerprintBuckets(ports.LogFilters) ([]ports.FingerprintBucket, error) {
+	return nil, r.err
+}
+
+func TestStatsRoutesPreserveQueryErrors(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("query unavailable")
+	h := handlers.NewHandlers(nil, failingStatsLogRepository{err: wantErr}, sse.NewHub())
+	for _, tt := range []struct {
+		path    string
+		handler stdhttp.Handler
+		prefix  string
+	}{
+		{path: "/api/v1/stats/logs", handler: handlers.LogBucketsHandler(h), prefix: "Failed to fetch log stats: "},
+		{path: "/api/v1/stats/fingerprints", handler: handlers.FingerprintBucketsHandler(h), prefix: "Failed to fetch fingerprint stats: "},
+	} {
+		req := httptest.NewRequest(stdhttp.MethodGet, tt.path, nil)
+		rec := httptest.NewRecorder()
+		tt.handler.ServeHTTP(rec, req)
+		if rec.Code != stdhttp.StatusInternalServerError {
+			t.Fatalf("GET %s status = %d; want %d", tt.path, rec.Code, stdhttp.StatusInternalServerError)
+		}
+		if got := strings.TrimSpace(rec.Body.String()); got != tt.prefix+wantErr.Error() {
+			t.Fatalf("GET %s body = %q; want %q", tt.path, got, tt.prefix+wantErr.Error())
+		}
 	}
 }
 

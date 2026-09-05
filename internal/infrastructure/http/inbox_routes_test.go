@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/dotcommander/glog/internal/domain/ports"
 	"github.com/dotcommander/glog/internal/infrastructure/http/handlers"
 	"github.com/dotcommander/glog/internal/infrastructure/persistence/sqlite"
 	"github.com/dotcommander/glog/internal/infrastructure/sse"
@@ -17,7 +18,7 @@ import (
 func TestInboxRoutesLifecycle(t *testing.T) {
 	t.Parallel()
 
-	router := newInboxTestRouter(t)
+	router := newInboxTestRouter(t, true)
 
 	created := requestJSON(t, router, http.MethodPost, "/api/v1/inbox", map[string]any{
 		"title":      "Investigate flaky checkout",
@@ -65,7 +66,7 @@ func TestInboxRoutesLifecycle(t *testing.T) {
 func TestInboxRoutesRejectInvalidPayloads(t *testing.T) {
 	t.Parallel()
 
-	router := newInboxTestRouter(t)
+	router := newInboxTestRouter(t, true)
 
 	tests := []struct {
 		name string
@@ -91,7 +92,7 @@ func TestInboxRoutesRejectInvalidPayloads(t *testing.T) {
 func TestInboxRoutesRejectUnknownJSONFields(t *testing.T) {
 	t.Parallel()
 
-	router := newInboxTestRouter(t)
+	router := newInboxTestRouter(t, true)
 
 	requestStatus(t, router, http.MethodPost, "/api/v1/inbox", map[string]any{
 		"title":      "Investigate drift",
@@ -99,7 +100,37 @@ func TestInboxRoutesRejectUnknownJSONFields(t *testing.T) {
 	}, http.StatusBadRequest)
 }
 
-func newInboxTestRouter(t *testing.T) http.Handler {
+func TestInboxRoutesRequireConfiguredRepo(t *testing.T) {
+	t.Parallel()
+
+	router := newInboxTestRouter(t, false)
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   map[string]any
+	}{
+		{name: "list", method: http.MethodGet, path: "/api/v1/inbox"},
+		{name: "create", method: http.MethodPost, path: "/api/v1/inbox", body: map[string]any{"title": "ignored"}},
+		{name: "get", method: http.MethodGet, path: "/api/v1/inbox/invalid"},
+		{name: "update", method: http.MethodPatch, path: "/api/v1/inbox/invalid", body: map[string]any{"title": "ignored"}},
+		{name: "delete", method: http.MethodDelete, path: "/api/v1/inbox/invalid"},
+		{name: "complete", method: http.MethodPost, path: "/api/v1/inbox/invalid/done"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			rec := requestStatus(t, router, tt.method, tt.path, tt.body, http.StatusServiceUnavailable)
+			if got, want := rec.Body.String(), "Inbox is not configured\n"; got != want {
+				t.Fatalf("%s %s body = %q; want %q", tt.method, tt.path, got, want)
+			}
+		})
+	}
+}
+
+func newInboxTestRouter(t *testing.T, configureInboxRepo bool) http.Handler {
 	t.Helper()
 
 	db, err := sqlite.New(filepath.Join(t.TempDir(), "glog.db"))
@@ -117,10 +148,13 @@ func newInboxTestRouter(t *testing.T) http.Handler {
 
 	hostRepo := sqlite.NewHostRepository(db)
 	logRepo := sqlite.NewLogRepository(db)
-	inboxRepo := sqlite.NewInboxRepository(db)
 	hub := sse.NewHub()
 	h := handlers.NewHandlers(hostRepo, logRepo, hub)
-	h.SetInboxRepo(inboxRepo)
+	var inboxRepo ports.InboxRepository
+	if configureInboxRepo {
+		inboxRepo = sqlite.NewInboxRepository(db)
+		h.SetInboxRepo(inboxRepo)
+	}
 
 	return NewRouter(&RouterDeps{
 		DB:        db,

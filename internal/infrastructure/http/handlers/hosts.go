@@ -193,21 +193,8 @@ func ListHostsHandler(h *Handlers) http.HandlerFunc {
 // GetHostHandler handles GET /api/v1/hosts/{id} - Get host details.
 func GetHostHandler(h *Handlers) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Parse host ID from URL
-		idStr := chi.URLParam(r, "id")
-		id, err := strconv.ParseInt(idStr, 10, 64)
-		if err != nil {
-			http.Error(w, "Invalid host ID", http.StatusBadRequest)
-			return
-		}
-
-		host, err := h.hostRepo.FindByID(id)
-		if err != nil {
-			if errors.Is(err, ports.ErrNotFound) {
-				http.Error(w, "Host not found", http.StatusNotFound)
-				return
-			}
-			http.Error(w, "Failed to fetch host: "+err.Error(), http.StatusInternalServerError)
+		host, ok := h.requireHost(w, r)
+		if !ok {
 			return
 		}
 
@@ -219,26 +206,13 @@ func GetHostHandler(h *Handlers) http.HandlerFunc {
 // GetHostStatsHandler handles GET /api/v1/hosts/{id}/stats - Get host statistics.
 func GetHostStatsHandler(h *Handlers) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		idStr := chi.URLParam(r, "id")
-		hostID, err := strconv.ParseInt(idStr, 10, 64)
-		if err != nil {
-			http.Error(w, "Invalid host ID", http.StatusBadRequest)
-			return
-		}
-
-		// Verify host exists
-		_, err = h.hostRepo.FindByID(hostID)
-		if err != nil {
-			if errors.Is(err, ports.ErrNotFound) {
-				http.Error(w, "Host not found", http.StatusNotFound)
-				return
-			}
-			http.Error(w, "Failed to fetch host: "+err.Error(), http.StatusInternalServerError)
+		host, ok := h.requireHost(w, r)
+		if !ok {
 			return
 		}
 
 		// Get all stats in a single query
-		logStats, err := h.logRepo.GetHostStats(hostID)
+		logStats, err := h.logRepo.GetHostStats(host.ID)
 		if err != nil {
 			http.Error(w, "Failed to get host stats: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -264,4 +238,25 @@ func GetHostStatsHandler(h *Handlers) http.HandlerFunc {
 
 		writeJSON(w, http.StatusOK, stats)
 	}
+}
+
+// requireHost loads the host identified by the current route or writes its lookup error.
+func (h *Handlers) requireHost(w http.ResponseWriter, r *http.Request) (*entities.Host, bool) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid host ID", http.StatusBadRequest)
+		return nil, false
+	}
+
+	host, err := h.hostRepo.FindByID(id)
+	if err != nil {
+		if errors.Is(err, ports.ErrNotFound) {
+			http.Error(w, "Host not found", http.StatusNotFound)
+			return nil, false
+		}
+		http.Error(w, "Failed to fetch host: "+err.Error(), http.StatusInternalServerError)
+		return nil, false
+	}
+
+	return host, true
 }
