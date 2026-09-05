@@ -134,22 +134,12 @@ func sendBulkLogs(server, apiKey, level string, messages []string, fields map[st
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		return 0, fmt.Errorf("request failed (status %d): %s", resp.StatusCode, readResponseBodySnippet(resp.Body))
-	}
-
 	var result struct {
 		Count   int  `json:"count"`
 		Success bool `json:"success"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return 0, fmt.Errorf("failed to decode response: %w", err)
+	if err := doJSON(req, http.StatusCreated, "request failed", &result); err != nil {
+		return 0, err
 	}
 
 	return result.Count, nil
@@ -300,26 +290,13 @@ func sendLog(server, apiKey, level, message string, fields map[string]any) (int6
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	// Send request
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Check response status
-	if resp.StatusCode != http.StatusCreated {
-		return 0, fmt.Errorf("request failed (status %d): %s", resp.StatusCode, readResponseBodySnippet(resp.Body))
-	}
-
-	// Parse response
 	var result struct {
 		ID      int64 `json:"id"`
 		HostID  int64 `json:"host_id"`
 		Success bool  `json:"success"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return 0, fmt.Errorf("failed to decode response: %w", err)
+	if err := doJSON(req, http.StatusCreated, "request failed", &result); err != nil {
+		return 0, err
 	}
 
 	return result.ID, nil

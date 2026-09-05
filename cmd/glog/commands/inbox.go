@@ -136,17 +136,9 @@ func createInboxItem(server string, body map[string]any) (*InboxItemResponse, er
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		return nil, fmt.Errorf("create failed (status %d): %s", resp.StatusCode, readResponseBodySnippet(resp.Body))
-	}
 	var item InboxItemResponse
-	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	if err := doJSON(req, http.StatusCreated, "create failed", &item); err != nil {
+		return nil, err
 	}
 	return &item, nil
 }
@@ -169,19 +161,15 @@ func listInboxItems(server, status, kind, repo, sessionID string) ([]InboxItemRe
 	if encoded := values.Encode(); encoded != "" {
 		reqURL += "?" + encoded
 	}
-	resp, err := httpClient.Get(reqURL)
+	req, err := http.NewRequest("GET", reqURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("list failed (status %d): %s", resp.StatusCode, readResponseBodySnippet(resp.Body))
 	}
 	var result struct {
 		Items []InboxItemResponse `json:"items"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	if err := doJSON(req, http.StatusOK, "list failed", &result); err != nil {
+		return nil, err
 	}
 	return result.Items, nil
 }
@@ -191,17 +179,9 @@ func completeInboxItem(server, id string) (*InboxItemResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("complete failed (status %d): %s", resp.StatusCode, readResponseBodySnippet(resp.Body))
-	}
 	var item InboxItemResponse
-	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	if err := doJSON(req, http.StatusOK, "complete failed", &item); err != nil {
+		return nil, err
 	}
 	return &item, nil
 }

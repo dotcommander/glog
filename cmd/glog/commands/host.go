@@ -203,21 +203,9 @@ func registerHost(server, name string, tags []string, description, hostname, ip 
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Check response status
-	if resp.StatusCode != http.StatusCreated {
-		return nil, fmt.Errorf("registration failed (status %d): %s", resp.StatusCode, readResponseBodySnippet(resp.Body))
-	}
-
-	// Parse response
 	var hostResp HostRegistrationResponse
-	if err := json.NewDecoder(resp.Body).Decode(&hostResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	if err := doJSON(req, http.StatusCreated, "registration failed", &hostResp); err != nil {
+		return nil, err
 	}
 
 	return &hostResp, nil
@@ -230,23 +218,12 @@ func listHosts(server string) ([]HostRegistrationResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("request failed (status %d): %s", resp.StatusCode, readResponseBodySnippet(resp.Body))
-	}
-
-	// Parse response
 	var result struct {
 		Hosts []HostRegistrationResponse `json:"hosts"`
 		Total int                        `json:"total"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	if err := doJSON(req, http.StatusOK, "request failed", &result); err != nil {
+		return nil, err
 	}
 
 	return result.Hosts, nil
