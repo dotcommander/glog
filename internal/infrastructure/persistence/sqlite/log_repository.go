@@ -94,6 +94,20 @@ func updateSummaryBuckets(exec sqlExecer, logs []*entities.Log) error {
 	return nil
 }
 
+// finalizeLogInsert updates derived log data and commits the insert transaction.
+func finalizeLogInsert(tx *sql.Tx, logs []*entities.Log) error {
+	if err := updateSummaryBuckets(tx, logs); err != nil {
+		return err
+	}
+	if err := updateHostLogCounters(tx, logs); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	return nil
+}
+
 func parseSQLiteTime(value string) (time.Time, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -152,14 +166,8 @@ func (r *LogRepository) Create(log *entities.Log) error {
 	}
 
 	log.ID = id
-	if err := updateSummaryBuckets(tx, []*entities.Log{log}); err != nil {
+	if err := finalizeLogInsert(tx, []*entities.Log{log}); err != nil {
 		return err
-	}
-	if err := updateHostLogCounters(tx, []*entities.Log{log}); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 	return nil
 }
@@ -206,16 +214,8 @@ func (r *LogRepository) BulkCreate(logs []*entities.Log) ([]int64, error) {
 		log.ID = id
 	}
 
-	if err := updateSummaryBuckets(tx, logs); err != nil {
+	if err := finalizeLogInsert(tx, logs); err != nil {
 		return nil, err
-	}
-	if err := updateHostLogCounters(tx, logs); err != nil {
-		return nil, err
-	}
-
-	// Commit transaction
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return ids, nil
