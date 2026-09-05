@@ -523,7 +523,7 @@ func (r *LogRepository) GetHostStats(hostID int64) (*ports.HostLogStats, error) 
 	`
 
 	var stats ports.HostLogStats
-	var lastLogTime sql.NullTime
+	var lastLogTime sql.NullString
 
 	err := r.db.Conn().QueryRow(query, todayStart, weekAgo, hostID).Scan(
 		&stats.TotalLogs,
@@ -538,7 +538,11 @@ func (r *LogRepository) GetHostStats(hostID int64) (*ports.HostLogStats, error) 
 	}
 
 	if lastLogTime.Valid {
-		stats.LastLogTime = &lastLogTime.Time
+		parsed, err := parseSQLiteTime(lastLogTime.String)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse last log time: %w", err)
+		}
+		stats.LastLogTime = &parsed
 	}
 
 	return &stats, nil
