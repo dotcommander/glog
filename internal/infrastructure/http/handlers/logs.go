@@ -31,7 +31,29 @@ func ListLogsHandler(h *Handlers) http.HandlerFunc {
 			return
 		}
 
-		// Query logs
+		// Snapshot paging is opt-in; legacy offset requests retain their existing totals.
+		var snapshotID *int64
+		if raw, present := r.URL.Query()["snapshot_id"]; present {
+			if len(raw) != 1 {
+				http.Error(w, "Invalid snapshot_id", http.StatusBadRequest)
+				return
+			}
+			id, err := strconv.ParseInt(raw[0], 10, 64)
+			if err != nil || id < 0 {
+				http.Error(w, "Invalid snapshot_id", http.StatusBadRequest)
+				return
+			}
+			if id == 0 {
+				id, err = h.logRepo.SnapshotLogID(r.Context())
+				if err != nil {
+					http.Error(w, "Failed to capture log snapshot", http.StatusInternalServerError)
+					return
+				}
+			}
+			snapshotID = &id
+			filters.SnapshotID = snapshotID
+		}
+
 		logs, total, err := h.logRepo.FindAll(filters)
 		if err != nil {
 			http.Error(w, "Failed to fetch logs: "+err.Error(), http.StatusInternalServerError)
@@ -44,12 +66,16 @@ func ListLogsHandler(h *Handlers) http.HandlerFunc {
 			resp[i] = logToResponse(log)
 		}
 
-		writeJSON(w, http.StatusOK, map[string]any{
+		response := map[string]any{
 			"logs":   resp,
 			"total":  total,
 			"limit":  filters.Limit,
 			"offset": filters.Offset,
-		})
+		}
+		if snapshotID != nil {
+			response["snapshot_id"] = strconv.FormatInt(*snapshotID, 10)
+		}
+		writeJSON(w, http.StatusOK, response)
 	}
 }
 

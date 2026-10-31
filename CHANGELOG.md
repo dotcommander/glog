@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.5.0 (2026-10-31)
+
+### Features
+
+- Add opt-in snapshot log pagination and bounded dashboard history with older/newer navigation.
+
+### Fixes
+
+- Keep dashboard filters and live updates consistent, debounce search, and cancel stale requests.
+- Update host freshness once per authenticated ingestion and aggregate bulk summary writes.
+- Parse SQLite aggregate timestamps correctly for host statistics.
+
+### Improvements
+
+- Centralize CLI JSON responses and shared HTTP handler policies.
+- Refresh Go and dashboard dependencies and migrate the dashboard build configuration.
+
+### Compatibility
+
+- Source builds now require Go 1.26 or newer. Existing log API requests remain supported.
+
 ## v0.4.3 (2026-08-29)
 
 ### Fixes

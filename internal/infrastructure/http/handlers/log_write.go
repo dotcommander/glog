@@ -109,7 +109,7 @@ func CreateLogHandler(h *Handlers) http.HandlerFunc {
 			return
 		}
 
-		// UpdateLastSeen is handled by auth middleware.
+		middleware.MarkLogCommitted(r.Context())
 		h.BroadcastLogCreated(logToResponse(log))
 		if h.recorder != nil {
 			h.recorder.Record("log.created", map[string]any{
@@ -163,7 +163,7 @@ func CreateBulkLogsHandler(h *Handlers) http.HandlerFunc {
 			return
 		}
 
-		// UpdateLastSeen is handled by auth middleware.
+		middleware.MarkLogCommitted(r.Context())
 		if h.recorder != nil {
 			var errorCount int64
 			for _, l := range logs {

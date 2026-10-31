@@ -61,39 +61,6 @@ func logInsertArgs(log *entities.Log) []any {
 // LogFilters is an alias for ports.LogFilters for backward compatibility.
 type LogFilters = ports.LogFilters
 
-func updateSummaryBuckets(exec sqlExecer, logs []*entities.Log) error {
-	for _, log := range logs {
-		bucketStart := log.Timestamp.UTC().Truncate(time.Hour)
-		bucketStartText := bucketStart.Format(time.RFC3339)
-		logTimestampText := log.Timestamp.UTC().Format(time.RFC3339)
-		if _, err := exec.Exec(`
-			INSERT INTO log_buckets (bucket_start, bucket_width, host_id, level, count)
-			VALUES (?, '1h', ?, ?, 1)
-			ON CONFLICT(bucket_start, bucket_width, host_id, level)
-			DO UPDATE SET count = count + 1
-		`, bucketStartText, log.HostID, string(log.Level)); err != nil {
-			return fmt.Errorf("failed to update log bucket: %w", err)
-		}
-
-		if log.Fingerprint == "" {
-			continue
-		}
-		if _, err := exec.Exec(`
-			INSERT INTO fingerprint_buckets (
-				bucket_start, bucket_width, fingerprint, level, count, first_seen, last_seen
-			) VALUES (?, '1h', ?, ?, 1, ?, ?)
-			ON CONFLICT(bucket_start, bucket_width, fingerprint, level)
-			DO UPDATE SET
-				count = count + 1,
-				first_seen = CASE WHEN excluded.first_seen < first_seen THEN excluded.first_seen ELSE first_seen END,
-				last_seen = CASE WHEN excluded.last_seen > last_seen THEN excluded.last_seen ELSE last_seen END
-		`, bucketStartText, log.Fingerprint, string(log.Level), logTimestampText, logTimestampText); err != nil {
-			return fmt.Errorf("failed to update fingerprint bucket: %w", err)
-		}
-	}
-	return nil
-}
-
 // finalizeLogInsert updates derived log data and commits the insert transaction.
 func finalizeLogInsert(tx *sql.Tx, logs []*entities.Log) error {
 	if err := updateSummaryBuckets(tx, logs); err != nil {
@@ -250,6 +217,11 @@ func buildWhereClause(filters LogFilters) (string, []interface{}) {
 	var whereClauses []string
 	var args []interface{}
 
+	if filters.SnapshotID != nil {
+		whereClauses = append(whereClauses, "l.id <= ?")
+		args = append(args, *filters.SnapshotID)
+	}
+
 	if filters.HostID != nil {
 		whereClauses = append(whereClauses, "l.host_id = ?")
 		args = append(args, *filters.HostID)
@@ -283,6 +255,15 @@ func buildWhereClause(filters LogFilters) (string, []interface{}) {
 	return "WHERE " + strings.Join(whereClauses, " AND "), args
 }
 
+// SnapshotLogID returns an insert high-water mark so new inserts cannot shift subsequent offset pages.
+func (r *LogRepository) SnapshotLogID(ctx context.Context) (int64, error) {
+	var id int64
+	if err := r.db.Conn().QueryRowContext(ctx, "SELECT COALESCE(MAX(id), 0) FROM logs").Scan(&id); err != nil {
+		return 0, fmt.Errorf("failed to capture log snapshot: %w", err)
+	}
+	return id, nil
+}
+
 // FindAll retrieves logs with filters and eager-loads host data.
 func (r *LogRepository) FindAll(filters LogFilters) ([]*entities.Log, int, error) {
 	whereStr, args := buildWhereClause(filters)
@@ -313,7 +294,7 @@ func (r *LogRepository) FindAll(filters LogFilters) ([]*entities.Log, int, error
 		FROM logs l
 		JOIN hosts h ON l.host_id = h.id
 		%s
-		ORDER BY l.%s DESC
+		ORDER BY l.%s DESC, l.id DESC
 		LIMIT ? OFFSET ?
 	`, whereStr, orderBy)
 

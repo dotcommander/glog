@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { browser } from '$app/environment';
+  import { browser } from '$app/env';
   import { logsStore } from '$lib/stores/logs.svelte';
   import { filtersStore } from '$lib/stores/filters.svelte';
   import { sseStore } from '$lib/stores/sse.svelte';
@@ -11,7 +11,6 @@
 
   // Auto-scroll to top when new logs arrive if we're near the top
   let nearTop = $state(true);
-  let lastScrollTop = 0;
 
   function handleScroll() {
     if (!container) return;
@@ -30,7 +29,6 @@
       loadMore();
     }
 
-    lastScrollTop = scrollTop;
   }
 
   async function loadMore() {
@@ -59,11 +57,10 @@
     }
   });
 
-  // Watch for filter changes and refetch logs
+  // Read the actual filter fields so property-level Svelte reactivity triggers the fetch.
   $effect(() => {
-    // This will re-run when any filter changes
-    const filters = filtersStore.filters;
-    logsStore.fetchLogs(filters);
+    const { level, search, host_id, start_date, end_date, limit, offset } = filtersStore.filters;
+    logsStore.fetchLogs({ level: [...(level || [])], search, host_id, start_date, end_date, limit, offset });
   });
 
   // Manual refresh handler
@@ -180,6 +177,13 @@
       </div>
     {/if}
 
+    {#if logsStore.viewingOlder || logsStore.pageOffset > 0}
+      <button class="m-3 rounded-md bg-blue-100 px-3 py-1 text-sm text-blue-800"
+        onclick={() => logsStore.fetchLogs({ ...filtersStore.filters, offset: 0 })}>
+        Newer logs
+      </button>
+    {/if}
+
     {#each logsStore.logs as log (log.id)}
       <LogEntry {log} />
     {/each}
@@ -190,6 +194,13 @@
         <div class="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600"></div>
         <p class="mt-2 text-sm">Loading more logs...</p>
       </div>
+    {/if}
+
+    {#if logsStore.hasMore && logsStore.logs.length > 0}
+      <button class="m-3 rounded-md bg-blue-100 px-3 py-1 text-sm text-blue-800"
+        disabled={logsStore.loading} onclick={loadMore}>
+        Older logs
+      </button>
     {/if}
 
     <!-- End of logs -->

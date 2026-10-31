@@ -12,8 +12,23 @@ type contextKey string
 
 const (
 	// ContextKeyHost is the context key for the authenticated host.
-	ContextKeyHost contextKey = "host"
+	ContextKeyHost         contextKey = "host"
+	contextKeyLogCommitted contextKey = "log-committed"
 )
+
+// WithLogCommitMarker allows the ingestion route to distinguish a committed write
+// from a rejected request without inferring transaction state from HTTP status.
+func WithLogCommitMarker(ctx context.Context) (context.Context, *bool) {
+	committed := new(bool)
+	return context.WithValue(ctx, contextKeyLogCommitted, committed), committed
+}
+
+// MarkLogCommitted is called only after the log transaction commits.
+func MarkLogCommitted(ctx context.Context) {
+	if committed, ok := ctx.Value(contextKeyLogCommitted).(*bool); ok {
+		*committed = true
+	}
+}
 
 // GetHostFromContext retrieves the authenticated host from the request context.
 func GetHostFromContext(ctx context.Context) (*entities.Host, bool) {

@@ -45,6 +45,7 @@ func updateHostLogCounters(exec sqlExecer, logs []*entities.Log) error {
 func incrementHostLogCounters(exec sqlExecer, hostID int64, totalNew int64, errorNew int64) error {
 	query := `
 		UPDATE hosts SET
+			last_seen = CURRENT_TIMESTAMP,
 			log_count = log_count + ?,
 			error_count = error_count + ?,
 			error_rate = CASE

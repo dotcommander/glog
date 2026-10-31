@@ -1,5 +1,4 @@
-import { browser } from '$app/environment';
-import { page } from '$app/stores';
+import { browser } from '$app/env';
 import type { LogFilters } from '$lib/types';
 
 class FiltersStore {
@@ -18,10 +17,6 @@ class FiltersStore {
       // Load filters from URL on initialization
       this.loadFromURL();
 
-      // Watch for URL changes
-      page.subscribe(($page) => {
-        this.loadFromURL();
-      });
     }
   }
 
@@ -38,6 +33,13 @@ class FiltersStore {
       limit: params.get('limit') ? parseInt(params.get('limit')!) : 50,
       offset: params.get('offset') ? parseInt(params.get('offset')!) : 0
     };
+
+    const current = this.filters;
+    if (current.search === newFilters.search && current.host_id === newFilters.host_id &&
+        current.start_date === newFilters.start_date && current.end_date === newFilters.end_date &&
+        current.limit === newFilters.limit && current.offset === newFilters.offset &&
+        (current.level || []).length === (newFilters.level || []).length &&
+        (current.level || []).every((level, index) => level === newFilters.level?.[index])) return;
 
     this.filters = newFilters;
   }

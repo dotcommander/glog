@@ -1,6 +1,4 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
 
 /* Custom styles */
 .log-level-trace { @apply text-purple-600 bg-purple-50; }

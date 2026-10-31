@@ -28,8 +28,8 @@
   }
 
   $effect(() => {
-    const filters = filtersStore.filters;
-    statsStore.fetchStats(filters);
+    const { host_id, start_date, end_date } = filtersStore.filters;
+    statsStore.fetchStats({ host_id, start_date, end_date });
   });
 </script>
 

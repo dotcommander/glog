@@ -35,7 +35,7 @@ type RouterDeps struct {
 
 // apiKeyAuthMiddleware creates middleware that validates API keys.
 // Uses the ports.HostRepository interface for flexibility.
-func apiKeyAuthMiddleware(hostRepo ports.HostRepository) func(http.Handler) http.Handler {
+func apiKeyAuthMiddleware(hostRepo ports.HostRepository, ingestion bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Extract API key from Authorization header
@@ -75,15 +75,27 @@ func apiKeyAuthMiddleware(hostRepo ports.HostRepository) func(http.Handler) http
 
 			slog.Debug("auth middleware: host found", "host_id", host.ID)
 
-			// Update host last seen (non-critical, log and continue on error)
+			ctx := context.WithValue(r.Context(), middleware.ContextKeyHost, host)
+			if ingestion {
+				// Successful ingestion updates freshness in its host-counter transaction;
+				// rejected requests still count as authenticated activity.
+				var committed *bool
+				ctx, committed = middleware.WithLogCommitMarker(ctx)
+				defer func() {
+					if !*committed {
+						if err := hostRepo.UpdateLastSeen(r.Context(), host.ID); err != nil {
+							slog.Warn("auth middleware: failed to update last_seen", "host_id", host.ID, "error", err)
+						}
+					}
+				}()
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			// Exports have no host-counter transaction.
 			if err := hostRepo.UpdateLastSeen(r.Context(), host.ID); err != nil {
 				slog.Warn("auth middleware: failed to update last_seen", "host_id", host.ID, "error", err)
 			}
-
-			// Store host in request context using middleware's key
-			ctx := context.WithValue(r.Context(), middleware.ContextKeyHost, host)
-
-			// Call next handler
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -126,13 +138,13 @@ func NewRouter(deps *RouterDeps, config *Config) chi.Router {
 		r.Post("/inbox/{id}/done", handlers.CompleteInboxItemHandler(h))
 
 		// Authenticated routes
-		r.With(apiKeyAuthMiddleware(deps.HostRepo)).Post("/logs", handlers.CreateLogHandler(h))
-		r.With(apiKeyAuthMiddleware(deps.HostRepo)).Post("/logs/bulk", handlers.CreateBulkLogsHandler(h))
+		r.With(apiKeyAuthMiddleware(deps.HostRepo, true)).Post("/logs", handlers.CreateLogHandler(h))
+		r.With(apiKeyAuthMiddleware(deps.HostRepo, true)).Post("/logs/bulk", handlers.CreateBulkLogsHandler(h))
 
 		// Export routes (authenticated)
-		r.With(apiKeyAuthMiddleware(deps.HostRepo)).Get("/export/json", handlers.ExportLogsHandler(h, "json"))
-		r.With(apiKeyAuthMiddleware(deps.HostRepo)).Get("/export/csv", handlers.ExportLogsHandler(h, "csv"))
-		r.With(apiKeyAuthMiddleware(deps.HostRepo)).Get("/export/ndjson", handlers.ExportLogsHandler(h, "ndjson"))
+		r.With(apiKeyAuthMiddleware(deps.HostRepo, false)).Get("/export/json", handlers.ExportLogsHandler(h, "json"))
+		r.With(apiKeyAuthMiddleware(deps.HostRepo, false)).Get("/export/csv", handlers.ExportLogsHandler(h, "csv"))
+		r.With(apiKeyAuthMiddleware(deps.HostRepo, false)).Get("/export/ndjson", handlers.ExportLogsHandler(h, "ndjson"))
 	})
 
 	// Health check

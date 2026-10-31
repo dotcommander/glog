@@ -1,4 +1,3 @@
-import { browser } from '$app/environment';
 import type { FingerprintBucket, LogBucket, LogFilters, Log } from '$lib/types';
 
 interface StatsStore {
@@ -16,11 +15,8 @@ class StatsStore {
   loading = $state(false);
   error = $state<string | null>(null);
 
-  constructor() {
-    if (browser) {
-      this.fetchStats();
-    }
-  }
+  private requestId = 0;
+  private controller: AbortController | null = null;
 
   buildQueryString(filters: LogFilters = {}): string {
     const params = new URLSearchParams();
@@ -44,14 +40,18 @@ class StatsStore {
   }
 
   async fetchStats(filters: LogFilters = {}) {
+    const id = ++this.requestId;
+    this.controller?.abort();
+    const controller = new AbortController();
+    this.controller = controller;
     this.loading = true;
     this.error = null;
 
     try {
       const queryString = this.buildQueryString(filters);
       const [logsResponse, fingerprintsResponse] = await Promise.all([
-        fetch(`/api/v1/stats/logs?${queryString}`),
-        fetch(`/api/v1/stats/fingerprints?${queryString}`)
+        fetch(`/api/v1/stats/logs?${queryString}`, { signal: controller.signal }),
+        fetch(`/api/v1/stats/fingerprints?${queryString}`, { signal: controller.signal })
       ]);
 
       if (!logsResponse.ok) {
@@ -63,14 +63,19 @@ class StatsStore {
 
       const logsData = await logsResponse.json();
       const fingerprintsData = await fingerprintsResponse.json();
+      if (id !== this.requestId) return;
 
       this.logBuckets = logsData.buckets || [];
       this.fingerprintBuckets = fingerprintsData.buckets || [];
     } catch (err) {
+      if (id !== this.requestId || controller.signal.aborted) return;
       this.error = err instanceof Error ? err.message : 'Failed to fetch stats';
       console.error('Error fetching stats:', err);
     } finally {
-      this.loading = false;
+      if (id === this.requestId) {
+        this.loading = false;
+        this.controller = null;
+      }
     }
   }
 

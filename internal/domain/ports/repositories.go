@@ -56,6 +56,7 @@ type LogFilters struct {
 	ToDate          string
 	Limit           int
 	Offset          int
+	SnapshotID      *int64 // Optional stable upper ID bound for offset paging.
 	OrderBy         string // "timestamp" or "created_at"
 	Stride          int
 	IncludeInternal bool
@@ -136,6 +137,8 @@ type LogRepository interface {
 
 	// FindAll retrieves logs with filters and eager-loads host data.
 	FindAll(filters LogFilters) ([]*entities.Log, int, error)
+	// SnapshotLogID captures the current insert high-water mark before paging.
+	SnapshotLogID(ctx context.Context) (int64, error)
 
 	// StreamAll streams logs with filters and eager-loaded host data.
 	StreamAll(ctx context.Context, filters LogFilters, fn func(*entities.Log) error) error

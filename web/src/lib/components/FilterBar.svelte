@@ -16,13 +16,23 @@
     { value: 'fatal', label: 'Fatal', color: 'gray' }
   ];
 
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+
   function applySearch() {
-    filtersStore.setSearch(searchInput);
+    clearTimeout(searchTimer);
+    searchTimer = undefined;
+    if (searchInput !== filtersStore.filters.search) filtersStore.setSearch(searchInput);
+  }
+
+  function queueSearch() {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(applySearch, 300);
   }
 
   function clearSearch() {
+    clearTimeout(searchTimer);
     searchInput = '';
-    filtersStore.setSearch('');
+    applySearch();
   }
 
   function toggleLevel(level: string) {
@@ -64,7 +74,10 @@
   import { onMount } from 'svelte';
   onMount(() => {
     document.addEventListener('keydown', handleKeydown);
-    return () => document.removeEventListener('keydown', handleKeydown);
+    return () => {
+      clearTimeout(searchTimer);
+      document.removeEventListener('keydown', handleKeydown);
+    };
   });
 </script>
 
@@ -78,7 +91,8 @@
           id="search-input"
           type="text"
           bind:value={searchInput}
-          oninput={applySearch}
+          oninput={queueSearch}
+          onkeydown={(event) => { if (event.key === 'Enter') applySearch(); }}
           placeholder="Search logs... (Ctrl+K)"
           class="h-9 w-full rounded-md border border-gray-300 px-3 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
@@ -161,6 +175,7 @@
         <button
           class="h-9 rounded-md px-3 text-sm text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 md:shrink-0"
           onclick={() => {
+            clearTimeout(searchTimer);
             filtersStore.clearFilters();
             searchInput = '';
             startDate = '';

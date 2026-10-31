@@ -1,7 +1,7 @@
-import { browser } from '$app/environment';
+import { browser } from '$app/env';
 import { logsStore } from './logs.svelte';
 import { hostsStore } from './hosts.svelte';
-import type { Log, SSEEvent } from '$lib/types';
+import { filtersStore } from './filters.svelte';
 
 class SSEStore {
   eventSource: EventSource | null = $state(null);
@@ -71,9 +71,7 @@ class SSEStore {
       this.eventSource.addEventListener('log.deleted', (event) => {
         try {
           const logData = JSON.parse(event.data);
-          // Remove log from store
-          logsStore.logs = logsStore.logs.filter((log: Log) => log.id !== logData.id);
-          logsStore.total = Math.max(0, logsStore.total - 1);
+          logsStore.removeLog(logData.id);
         } catch (err) {
           console.error('Failed to parse log deleted event:', err);
         }
@@ -123,7 +121,7 @@ class SSEStore {
       console.log('SSE not connected, refreshing data manually');
       await Promise.all([
         hostsStore.fetchHosts(),
-        logsStore.fetchLogs()
+        logsStore.fetchLogs(filtersStore.filters)
       ]);
     }
   }

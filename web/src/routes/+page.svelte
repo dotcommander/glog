@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { page } from '$app/state';
+  import { filtersStore } from '$lib/stores/filters.svelte';
   import FilterBar from '$lib/components/FilterBar.svelte';
   import HostList from '$lib/components/hosts/HostList.svelte';
   import InboxPanel from '$lib/components/inbox/InboxPanel.svelte';
@@ -7,6 +9,12 @@
 
   let showMobileHosts = $state(false);
   let view = $state<'logs' | 'inbox'>('logs');
+
+  // Keep filters in sync with client-side navigation and browser history.
+  $effect(() => {
+    page.url.href;
+    filtersStore.loadFromURL();
+  });
 
   // Dashboard is ready - stores and SSE are automatically initialized
 </script>
