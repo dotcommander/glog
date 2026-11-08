@@ -116,7 +116,14 @@ func inboxWhere(filters ports.InboxFilters) (string, []any) {
 	}
 	add("status", filters.Status)
 	add("kind", filters.Kind)
-	add("repo", filters.Repo)
+	if repo := strings.TrimSpace(filters.Repo); repo != "" {
+		base := strings.TrimSuffix(repo, "/")
+		if i := strings.LastIndex(base, "/"); i >= 0 {
+			base = base[i+1:]
+		}
+		clauses = append(clauses, "(repo = ? OR repo = ? OR repo LIKE ?)")
+		args = append(args, repo, base, "%/"+base)
+	}
 	add("session_id", filters.SessionID)
 	add("source", filters.Source)
 	if len(clauses) == 0 {

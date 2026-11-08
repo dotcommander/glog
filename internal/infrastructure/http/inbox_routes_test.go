@@ -43,6 +43,13 @@ func TestInboxRoutesLifecycle(t *testing.T) {
 		t.Fatalf("list total = %d; want 1", got)
 	}
 
+	for _, spelling := range []string{"glog", "/Users/x/code/go/src/public/glog"} {
+		alt := requestJSON(t, router, http.MethodGet, "/api/v1/inbox?status=open&repo="+spelling, nil, http.StatusOK)
+		if got := int(alt["total"].(float64)); got != 1 {
+			t.Fatalf("repo spelling %q total = %d; want 1", spelling, got)
+		}
+	}
+
 	updated := requestJSON(t, router, http.MethodPatch, "/api/v1/inbox/"+itoa(id), map[string]any{
 		"status":     "in_progress",
 		"claimed_by": "codex",
